@@ -178,7 +178,7 @@ public class FixRangeCompareToConstructionOne {
         public long pointY;
         public String[] keywords;
 
-        DataRow(int fileID, long pointX, long pointY, String[] keywords) {
+        public DataRow(int fileID, long pointX, long pointY, String[] keywords) {
             this.fileID = fileID;
             this.pointX = pointX;
             this.pointY = pointY;
