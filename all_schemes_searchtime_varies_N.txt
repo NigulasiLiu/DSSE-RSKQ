@@ -1,0 +1,26 @@
+The number of inserted data	Running Time	Running Time	Running Time	Running Time
+	s	s	s	s
+maxfiles = 2^20 |H|=10 R=3%	RSKQ_BRQ	RSKQ_GRQ	SKQ	ConstructionOne
+
+2	3.6581E-4	3.5811E-4	8.9048E-4	0.04547
+4	5.0823E-4	3.9956E-4	0.00144	0.17724
+6	6.0971E-4	4.3813E-4	0.00199	0.38984
+8	7.0898E-4	4.8803E-4	0.00273	0.70747
+10	8.0718E-4	5.4976E-4	0.00359	1.14828
+
+
+SKQ的耗时与RSKQ_BRQ的比值如下：
+
+第1行: 2.43倍
+
+第2行: 2.83倍
+
+第3行: 3.26倍
+
+第4行: 3.85倍
+
+第5行: 4.45倍
+
+平均而言，SKQ的耗时约为RSKQ_BRQ的3.37倍。
+
+最小倍数为2.43倍，最大倍数为4.45倍
