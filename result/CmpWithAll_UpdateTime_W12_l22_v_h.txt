@@ -1,0 +1,11 @@
+The Hilbert Curve Order	Running Time	Running Time	Running Time
+	ms	ms	ms
+order	Ours	SKQ	Construction
+
+8	0.36803	0.6519	0.65837
+9	0.36438	0.68157	0.87775
+10	0.40619	0.75094	2.06102
+11	0.40991	0.78158	5.14454
+12	0.44711	0.85305	16.74207
+13	0.49665	0.926	59.4947
+14	0.53001	0.99203	228.91204

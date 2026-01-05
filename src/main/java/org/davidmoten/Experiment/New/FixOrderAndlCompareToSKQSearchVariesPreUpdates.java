@@ -1,4 +1,4 @@
-package org.davidmoten.Experiment.PerformanceEval;
+package org.davidmoten.Experiment.New;
 
 import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
 import org.davidmoten.Scheme.RSKQ.RSKQ_Biginteger;
@@ -8,9 +8,8 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne.loadOneData;
-import static org.davidmoten.Experiment.TestByUserInput.BRQComparisonInput.generateHilbertMatrix;
 
-public class SearchVariesByPreUpdates {
+public class FixOrderAndlCompareToSKQSearchVariesPreUpdates {
 
     public static void main(String[] args) throws Exception {
 

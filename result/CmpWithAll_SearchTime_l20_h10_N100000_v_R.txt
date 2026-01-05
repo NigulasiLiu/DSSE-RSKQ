@@ -1,0 +1,9 @@
+Side length of search range	Running Time	Running Time	Running Time
+%	s	s	s
+maxfiles = 2^20 |H|=10 l=2^20,N=10W	RSKQ	SKQ	Construction
+2	4.0577E-4	0.00191	0.99705
+4	9.3623E-4	0.00566	1.2076
+6	0.00162	0.00879	1.41554
+8	0.00262	0.0101	1.62099
+10	0.00398	0.02201	1.87741
+12	0.00659	0.05317	2.08076

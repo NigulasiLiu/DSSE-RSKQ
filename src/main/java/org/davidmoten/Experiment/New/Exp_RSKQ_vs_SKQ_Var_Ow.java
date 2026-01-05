@@ -35,7 +35,7 @@ public class Exp_RSKQ_vs_SKQ_Var_Ow {
         // --------------------------------------------------------
         String filepath = "src/dataset/spatial_data_set_10W.csv";
         int fixedL = 1 << 20; // l = 2^20
-        int fixedH = 8;      // h = 8，10，12
+        int fixedH = 12;      // h = 8，10，12,该脚本设置3次参数，跑3次
         int rangePredicate = 1 << 30;
         int div = 100;
         int searchRangePercent = 3; // R = 3%
@@ -143,8 +143,8 @@ public class Exp_RSKQ_vs_SKQ_Var_Ow {
         }
 
         // 5. 写入文件
-        writeResults("experiment_3_ow_impact_h_8.txt", owCheckpoints, resRSKQ, resSKQ);
-        System.out.println("\n>>> 实验结束，结果已写入 experiment_3_ow_impact.txt");
+        writeResults("experiment_3_ow_impact_h_12.txt", owCheckpoints, resRSKQ, resSKQ);
+        System.out.println("\n>>> 实验结束，结果已写入 experiment_3_ow_impact_h_12.txt");
     }
 
     private static List<FixRangeCompareToConstructionOne.DataRow> normalizeData(List<FixRangeCompareToConstructionOne.DataRow> rawData, int h, long maxX, long maxY) {
