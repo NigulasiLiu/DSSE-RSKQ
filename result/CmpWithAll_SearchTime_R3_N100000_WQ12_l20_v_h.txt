@@ -6,3 +6,5 @@ The Hilbert Curve Order	Running Time	Running Time	Running Time
 10	5.19931E-4	0.00247	1.2851
 11	0.00175	0.00729	1.35593
 12	0.00577	0.01229	1.49944
+
+探究不同h下的搜索耗时

@@ -1,6 +1,6 @@
 Updated count of keyword	Running Time	Running Time	Running Time	Running Time	Running Time	Running Time
 	ms	ms	ms	ms	ms	ms
-maxfiles = 2^20 order=12	4	8	12	4	8	12
+maxfiles = 2^20 order=12	WQ=4	WQ=8	WQ=12	WQ=4	WQ=8	WQ=12
 
 500	18.567	24.39644	33.51322	83.08562	111.98314	152.36446
 750	19.74082	34.33723	55.07612	89.22321	152.15526	194.05324
@@ -14,3 +14,13 @@ maxfiles = 2^20 order=12	4	8	12	4	8	12
 
 
 SKQ的搜索耗时约为RSKQ的3.5~4.6倍，基本上在4.4到4.6倍
+搜索时需要搜素的元素个数等于1+|W_Q|，因为搜索区域被手动限定在1个点，也就是发生o_w次更新的点
+
+本实验的特点：
+点查询 (Range=1)：直接查询数据点所在的精确位置。必中：查询范围一定包含目标数据，系统必须处理完整的历史更新列表。
+
+探究的是前向隐私部分对算法整体的计算性能影响
+
+
+
+
