@@ -9,6 +9,8 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -16,13 +18,13 @@ import java.util.Random;
 import static org.davidmoten.Experiment.TestByUserInput.BRQComparisonInput.generateHilbertMatrix;
 
 /**
- * 实验脚本 2: Exp_All_Schemes_Var_H_R_N
- * * 目标: 对比 RSKQ, SKQ (Wang), Cons1
- * * 包含实验:
- * 1. 实验 C & D: h (HilbertOrder) 变化对 Update Time 和 Search Time 的影响。
- * 2. 实验 E: R (搜索范围占比) 变化对 Search Time 的影响。
- * 3. 实验 F: N (数据集大小) 变化对 Search Time 的影响。
- * * 输出: experiment_2_all_schemes.txt
+ * 实验脚本 2 (V3.0 最终调整版): Exp_All_Schemes_Var_H_R_N
+ * * 核心调整:
+ * 1. [Cons1 特别处理]: 在实验 C, D, E (基准为 10W 数据) 中，Cons1 仅处理随机抽取的 2^h 条数据。
+ * 这意味着 Cons1 的 Update Time 是 2^h 次操作的总耗时，而 RSKQ/SKQ 是 10W 次的总耗时。
+ * 2. [基准保持]: RSKQ 和 SKQ 始终处理完整的 10W 数据。
+ * 3. [实验 F]: 保持不变，Cons1 需处理完整的 N (2W~10W) 以验证数据量影响。
+ * 4. 保留了坐标归一化逻辑。
  */
 public class Exp_All_Schemes_Var_H_R_N {
 
@@ -46,7 +48,7 @@ public class Exp_All_Schemes_Var_H_R_N {
         int[] hValues = {8, 10, 12};
         double[] c_Update_RSKQ = new double[hValues.length];
         double[] c_Update_SKQ  = new double[hValues.length];
-        double[] c_Update_Cons1= new double[hValues.length];
+        double[] c_Update_Cons1= new double[hValues.length]; // 注意：这是 2^h 次的时间
 
         double[] d_Search_RSKQ = new double[hValues.length];
         double[] d_Search_SKQ  = new double[hValues.length];
@@ -64,141 +66,147 @@ public class Exp_All_Schemes_Var_H_R_N {
         double[] f_Search_SKQ  = new double[nLabels.length];
         double[] f_Search_Cons1= new double[nLabels.length];
 
-        System.out.println(">>> 开始实验 2: 对比 RSKQ, SKQ, Cons1");
+        System.out.println(">>> 开始实验 2 (V3.0): Cons1 缩减采样 + 坐标归一化");
 
         // --------------------------------------------------------
-        // 1. 实验 C & D: h 变化 (固定 N=10W, R=3%)
+        // 1. 实验 C & D: h 变化 (N=10W 背景下)
         // --------------------------------------------------------
         System.out.println("\n============================================================");
-        System.out.println(">>> 实验 C & D: h (HilbertOrder) 变化 (N=10W, R=3%)");
+        System.out.println(">>> 实验 C & D: h 变化");
+        System.out.println("    RSKQ/SKQ: 处理 10W 数据");
+        System.out.println("    Cons1:    处理 2^h 条随机数据 (Setup & Update)");
         System.out.println("============================================================");
 
-        // 加载 10W 数据
-        List<FixRangeCompareToConstructionOne.DataRow> data10W = FixRangeCompareToConstructionOne.loadDataFromFile(basePath + "10W.csv");
-        int size10W = data10W.size();
+        // 加载原始 10W 数据
+        List<FixRangeCompareToConstructionOne.DataRow> rawData10W = FixRangeCompareToConstructionOne.loadDataFromFile(basePath + "10W.csv");
+        int size10W = rawData10W.size();
+
+        // 计算最大边界用于归一化
+        long maxOriginalX = 0, maxOriginalY = 0;
+        for(FixRangeCompareToConstructionOne.DataRow row : rawData10W) {
+            if(row.pointX > maxOriginalX) maxOriginalX = row.pointX;
+            if(row.pointY > maxOriginalY) maxOriginalY = row.pointY;
+        }
 
         for (int i = 0; i < hValues.length; i++) {
             int h = hValues[i];
             System.out.printf(">> 执行中: h=%d ... \n", h);
 
-            // --- RSKQ & SKQ Setup & Update Measure ---
+            // 1. 归一化数据 (10W)
+            List<FixRangeCompareToConstructionOne.DataRow> scaledData = normalizeData(rawData10W, h, maxOriginalX, maxOriginalY);
+
+            // ================== RSKQ & SKQ (Full 10W) ==================
             RSKQ_Biginteger rskq = new RSKQ_Biginteger(fixedL, h, 2);
             SKQ_Biginteger skq = new SKQ_Biginteger(128, rangePredicate, fixedL, h, 2);
 
-            // RSKQ Update
+            // RSKQ Update (10W)
             long start = System.nanoTime();
-            for (FixRangeCompareToConstructionOne.DataRow row : data10W) {
+            for (FixRangeCompareToConstructionOne.DataRow row : scaledData) {
                 rskq.ObjectUpdate(new long[]{row.pointX, row.pointY}, row.keywords, new String[]{"add"}, new int[]{row.fileID});
             }
             c_Update_RSKQ[i] = (System.nanoTime() - start) / 1e6;
 
-            // SKQ Update
+            // SKQ Update (10W)
             start = System.nanoTime();
-            for (FixRangeCompareToConstructionOne.DataRow row : data10W) {
+            for (FixRangeCompareToConstructionOne.DataRow row : scaledData) {
                 skq.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID}, rangePredicate);
             }
             c_Update_SKQ[i] = (System.nanoTime() - start) / 1e6;
 
-            // --- Cons1 Setup (SetupEDS) & Update Measure (ClientUpdate) ---
-            // 准备数据
-            int[] xCoords = new int[size10W];
-            int[] yCoords = new int[size10W];
-            for(int k=0; k<size10W; k++) {
-                xCoords[k] = (int) data10W.get(k).pointX;
-                yCoords[k] = (int) data10W.get(k).pointY;
+            // ================== Cons1 (Subset 2^h) ==================
+            // 准备 Cons1 数据子集
+            List<FixRangeCompareToConstructionOne.DataRow> cons1Data = new ArrayList<>(scaledData);
+            Collections.shuffle(cons1Data, random); // 随机打乱
+            int subsetSize = Math.min(1 << h, cons1Data.size()); // 取 2^h 条
+            cons1Data = cons1Data.subList(0, subsetSize);
+            System.out.printf("   [Cons1] 数据集大小缩减为: %d (2^%d)\n", subsetSize, h);
+
+            int[] xCoords = new int[subsetSize];
+            int[] yCoords = new int[subsetSize];
+            for(int k=0; k<subsetSize; k++) {
+                xCoords[k] = (int) cons1Data.get(k).pointX;
+                yCoords[k] = (int) cons1Data.get(k).pointY;
             }
-            ConstructionOne cons1 = new ConstructionOne(128, h, size10W, xCoords, yCoords);
+
+            // Cons1 Setup (构建子集索引)
+            ConstructionOne cons1 = new ConstructionOne(128, h, subsetSize, xCoords, yCoords);
             cons1.BTx = cons1.buildBinaryTree(h);
             cons1.BTy = cons1.buildBinaryTree(h);
-            List<String> idxX = cons1.buildInvertedIndex(h, size10W, xCoords);
-            List<String> idxY = cons1.buildInvertedIndex(h, size10W, yCoords);
+            List<String> idxX = cons1.buildInvertedIndex(h, subsetSize, xCoords);
+            List<String> idxY = cons1.buildInvertedIndex(h, subsetSize, yCoords);
             Map<Integer, String> Sx = cons1.buildxNodeInvertedIndex(idxX, h);
             Map<Integer, String> Sy = cons1.buildyNodeInvertedIndex(idxY, h);
-            cons1.setupEDS(Sx, Sy); // 静态构建不计入 "Dynamic Update Time"
+            cons1.setupEDS(Sx, Sy);
 
-            // Cons1 Dynamic Update Measurement (模拟 10W 次移动更新)
+            // ================== Search Experiment (Exp D) ==================
+            // RSKQ/SKQ 在 10W 数据上搜，Cons1 在 2^h 数据上搜
+            d_Search_RSKQ[i] = runSearchExperiment(rskq, null, null, scaledData, h, 3, div, random, totalSearchLoops, warmUpTimes);
+            d_Search_SKQ[i]  = runSearchExperiment(null, skq, null, scaledData, h, 3, div, random, totalSearchLoops, warmUpTimes);
+            d_Search_Cons1[i]= runSearchExperiment(null, null, cons1, cons1Data, h, 3, div, random, totalSearchLoops, warmUpTimes);
+
+            // ================== Cons1 Update Experiment (Exp C) ==================
+            // Cons1 Dynamic Update: 仅针对 subsetSize (2^h) 次
             start = System.nanoTime();
-            for(int k=0; k<size10W; k++) {
+            int maxVal = (1 << h) - 1;
+            for(int k=0; k<subsetSize; k++) {
                 int[] oldP = {xCoords[k], yCoords[k]};
-                // 模拟移动到 (x+1, y+1)，注意边界防越界 (2^h - 1)
-                int maxVal = (1 << h) - 1;
+                // 模拟移动
                 int newX = Math.min(xCoords[k] + 1, maxVal);
                 int newY = Math.min(yCoords[k] + 1, maxVal);
                 int[] newP = {newX, newY};
 
-                List<List<String>> updates = cons1.clientUpdate(oldP, newP);
-                cons1.serverUpdate(updates);
-
-                // 恢复坐标以保证后续搜索正确性?
-                // 考虑到 Search 实验需要基于原始分布，且 Cons1 的 Update 改变了树结构。
-                // 为了严谨，实验 D (Search) 应该在 Update 之前做，或者重置。
-                // 这里我们采取策略：先测 Search (Experiment D)，再测 Update (Experiment C)。
-                // 所以上面的 Update 代码逻辑顺序需要调整。
-            }
-            // 但为了代码结构清晰，我们这里实际上是：先 Setup -> 测 Search -> 测 Update。
-            // 由于上面已经写了 Update 逻辑，我们把计时值暂存，实际执行顺序调整如下：
-
-            // 重新初始化 Cons1 用于 Search 测试 (保证数据干净)
-            cons1 = new ConstructionOne(128, h, size10W, xCoords, yCoords);
-            cons1.BTx = cons1.buildBinaryTree(h);
-            cons1.BTy = cons1.buildBinaryTree(h);
-            cons1.setupEDS(Sx, Sy); // 重建
-
-            // --- Search Experiment (Experiment D) ---
-            d_Search_RSKQ[i] = runSearchExperiment(rskq, null, null, data10W, h, 3, div, random, totalSearchLoops, warmUpTimes, "RSKQ");
-            d_Search_SKQ[i]  = runSearchExperiment(null, skq, null, data10W, h, 3, div, random, totalSearchLoops, warmUpTimes, "SKQ");
-            d_Search_Cons1[i]= runSearchExperiment(null, null, cons1, data10W, h, 3, div, random, totalSearchLoops, warmUpTimes, "Cons1");
-
-            // --- Update Experiment (Experiment C) - Cons1 Only ---
-            // RSKQ 和 SKQ 的 Update Time 已经在前面测了 (Build Time)
-            // 现在测 Cons1 的 Dynamic Update
-            start = System.nanoTime();
-            for(int k=0; k<size10W; k++) {
-                int[] oldP = {xCoords[k], yCoords[k]};
-                int maxVal = (1 << h) - 1;
-                int newX = Math.min(xCoords[k] + 1, maxVal);
-                int newY = Math.min(yCoords[k] + 1, maxVal);
-                int[] newP = {newX, newY};
                 List<List<String>> updates = cons1.clientUpdate(oldP, newP);
                 cons1.serverUpdate(updates);
             }
             c_Update_Cons1[i] = (System.nanoTime() - start) / 1e6;
 
-            System.out.println("  -> h=" + h + " 完成.");
+            System.out.println("   -> 完成.");
             // GC
-            rskq = null; skq = null; cons1 = null;
+            rskq = null; skq = null; cons1 = null; scaledData = null; cons1Data = null;
             System.gc();
         }
 
         // --------------------------------------------------------
-        // 2. 实验 E: R 变化 (固定 N=10W, h=10)
+        // 2. 实验 E: R 变化 (固定 h=10)
         // --------------------------------------------------------
         System.out.println("\n============================================================");
-        System.out.println(">>> 实验 E: R (Range) 变化 (N=10W, h=10)");
+        System.out.println(">>> 实验 E: R (Range) 变化 (h=10)");
+        System.out.println("    RSKQ/SKQ: 10W 数据");
+        System.out.println("    Cons1:    2^10 (1024) 条数据");
         System.out.println("============================================================");
 
         int fixedH = 10;
-        // 初始化固定实例
-        System.out.print(">> 初始化固定实例 (h=10)... ");
+        List<FixRangeCompareToConstructionOne.DataRow> scaledDataFixedH = normalizeData(rawData10W, fixedH, maxOriginalX, maxOriginalY);
+
+        // --- RSKQ & SKQ Setup (10W) ---
+        System.out.print(">> 初始化 RSKQ/SKQ (10W)... ");
         RSKQ_Biginteger rskqFixed = new RSKQ_Biginteger(fixedL, fixedH, 2);
         SKQ_Biginteger skqFixed = new SKQ_Biginteger(128, rangePredicate, fixedL, fixedH, 2);
-
-        int[] xCoords10W = new int[size10W];
-        int[] yCoords10W = new int[size10W];
-        for(int k=0; k<size10W; k++) {
-            xCoords10W[k] = (int) data10W.get(k).pointX;
-            yCoords10W[k] = (int) data10W.get(k).pointY;
-
-            rskqFixed.ObjectUpdate(new long[]{xCoords10W[k], yCoords10W[k]}, data10W.get(k).keywords, new String[]{"add"}, new int[]{data10W.get(k).fileID});
-            skqFixed.update(new long[]{xCoords10W[k], yCoords10W[k]}, data10W.get(k).keywords, "add", new int[]{data10W.get(k).fileID}, rangePredicate);
+        for(FixRangeCompareToConstructionOne.DataRow row : scaledDataFixedH) {
+            rskqFixed.ObjectUpdate(new long[]{row.pointX, row.pointY}, row.keywords, new String[]{"add"}, new int[]{row.fileID});
+            skqFixed.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID}, rangePredicate);
         }
+        System.out.println("完成.");
 
-        ConstructionOne cons1Fixed = new ConstructionOne(128, fixedH, size10W, xCoords10W, yCoords10W);
+        // --- Cons1 Setup (Subset 1024) ---
+        System.out.print(">> 初始化 Cons1 (1024 subset)... ");
+        List<FixRangeCompareToConstructionOne.DataRow> cons1DataFixed = new ArrayList<>(scaledDataFixedH);
+        Collections.shuffle(cons1DataFixed, random);
+        int subsetSizeFixed = Math.min(1 << fixedH, cons1DataFixed.size()); // 1024
+        cons1DataFixed = cons1DataFixed.subList(0, subsetSizeFixed);
+
+        int[] xCFixed = new int[subsetSizeFixed];
+        int[] yCFixed = new int[subsetSizeFixed];
+        for(int k=0; k<subsetSizeFixed; k++) {
+            xCFixed[k] = (int) cons1DataFixed.get(k).pointX;
+            yCFixed[k] = (int) cons1DataFixed.get(k).pointY;
+        }
+        ConstructionOne cons1Fixed = new ConstructionOne(128, fixedH, subsetSizeFixed, xCFixed, yCFixed);
         cons1Fixed.BTx = cons1Fixed.buildBinaryTree(fixedH);
         cons1Fixed.BTy = cons1Fixed.buildBinaryTree(fixedH);
         cons1Fixed.setupEDS(
-                cons1Fixed.buildxNodeInvertedIndex(cons1Fixed.buildInvertedIndex(fixedH, size10W, xCoords10W), fixedH),
-                cons1Fixed.buildyNodeInvertedIndex(cons1Fixed.buildInvertedIndex(fixedH, size10W, yCoords10W), fixedH)
+                cons1Fixed.buildxNodeInvertedIndex(cons1Fixed.buildInvertedIndex(fixedH, subsetSizeFixed, xCFixed), fixedH),
+                cons1Fixed.buildyNodeInvertedIndex(cons1Fixed.buildInvertedIndex(fixedH, subsetSizeFixed, yCFixed), fixedH)
         );
         System.out.println("完成.");
 
@@ -206,15 +214,15 @@ public class Exp_All_Schemes_Var_H_R_N {
             int r = rValues[i];
             System.out.printf(">> 测试 R=%d%% ... ", r);
 
-            e_Search_RSKQ[i] = runSearchExperiment(rskqFixed, null, null, data10W, fixedH, r, div, random, totalSearchLoops, warmUpTimes, "RSKQ");
-            e_Search_SKQ[i]  = runSearchExperiment(null, skqFixed, null, data10W, fixedH, r, div, random, totalSearchLoops, warmUpTimes, "SKQ");
-            e_Search_Cons1[i]= runSearchExperiment(null, null, cons1Fixed, data10W, fixedH, r, div, random, totalSearchLoops, warmUpTimes, "Cons1");
+            e_Search_RSKQ[i] = runSearchExperiment(rskqFixed, null, null, scaledDataFixedH, fixedH, r, div, random, totalSearchLoops, warmUpTimes);
+            e_Search_SKQ[i]  = runSearchExperiment(null, skqFixed, null, scaledDataFixedH, fixedH, r, div, random, totalSearchLoops, warmUpTimes);
+            // Cons1 在其子集上搜
+            e_Search_Cons1[i]= runSearchExperiment(null, null, cons1Fixed, cons1DataFixed, fixedH, r, div, random, totalSearchLoops, warmUpTimes);
 
             System.out.println("完成.");
         }
 
-        // 释放固定实例
-        rskqFixed = null; skqFixed = null; cons1Fixed = null;
+        rskqFixed = null; skqFixed = null; cons1Fixed = null; scaledDataFixedH = null; cons1DataFixed = null;
         System.gc();
 
         // --------------------------------------------------------
@@ -222,30 +230,41 @@ public class Exp_All_Schemes_Var_H_R_N {
         // --------------------------------------------------------
         System.out.println("\n============================================================");
         System.out.println(">>> 实验 F: N (Dataset) 变化 (h=10, R=3%)");
+        System.out.println("    注意: 此处 Cons1 仍处理全量 N 数据 (2W~10W)");
         System.out.println("============================================================");
 
         for (int i = 0; i < nLabels.length; i++) {
             String label = nLabels[i];
             System.out.printf(">> 加载数据集: %s ... ", label);
 
-            List<FixRangeCompareToConstructionOne.DataRow> currentData = FixRangeCompareToConstructionOne.loadDataFromFile(basePath + label + ".csv");
-            int currentSize = currentData.size();
-            System.out.printf("共 %d 条. 初始化实例... ", currentSize);
+            List<FixRangeCompareToConstructionOne.DataRow> currentRawData = FixRangeCompareToConstructionOne.loadDataFromFile(basePath + label + ".csv");
+            int currentSize = currentRawData.size();
 
-            // Setup
+            // 计算当前数据集边界并归一化
+            long currMaxX = 0, currMaxY = 0;
+            for(FixRangeCompareToConstructionOne.DataRow row : currentRawData) {
+                if(row.pointX > currMaxX) currMaxX = row.pointX;
+                if(row.pointY > currMaxY) currMaxY = row.pointY;
+            }
+            List<FixRangeCompareToConstructionOne.DataRow> currentScaledData = normalizeData(currentRawData, fixedH, currMaxX, currMaxY);
+
+            System.out.printf("共 %d 条. 初始化... ", currentSize);
+
+            // RSKQ & SKQ
             RSKQ_Biginteger rskqN = new RSKQ_Biginteger(fixedL, fixedH, 2);
             SKQ_Biginteger skqN = new SKQ_Biginteger(128, rangePredicate, fixedL, fixedH, 2);
-
-            int[] xC = new int[currentSize];
-            int[] yC = new int[currentSize];
-
-            for(int k=0; k<currentSize; k++) {
-                xC[k] = (int) currentData.get(k).pointX;
-                yC[k] = (int) currentData.get(k).pointY;
-                rskqN.ObjectUpdate(new long[]{xC[k], yC[k]}, currentData.get(k).keywords, new String[]{"add"}, new int[]{currentData.get(k).fileID});
-                skqN.update(new long[]{xC[k], yC[k]}, currentData.get(k).keywords, "add", new int[]{currentData.get(k).fileID}, rangePredicate);
+            for(FixRangeCompareToConstructionOne.DataRow row : currentScaledData) {
+                rskqN.ObjectUpdate(new long[]{row.pointX, row.pointY}, row.keywords, new String[]{"add"}, new int[]{row.fileID});
+                skqN.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID}, rangePredicate);
             }
 
+            // Cons1 (全量 N)
+            int[] xC = new int[currentSize];
+            int[] yC = new int[currentSize];
+            for(int k=0; k<currentSize; k++) {
+                xC[k] = (int) currentScaledData.get(k).pointX;
+                yC[k] = (int) currentScaledData.get(k).pointY;
+            }
             ConstructionOne cons1N = new ConstructionOne(128, fixedH, currentSize, xC, yC);
             cons1N.BTx = cons1N.buildBinaryTree(fixedH);
             cons1N.BTy = cons1N.buildBinaryTree(fixedH);
@@ -255,19 +274,16 @@ public class Exp_All_Schemes_Var_H_R_N {
             );
 
             // Search Test
-            f_Search_RSKQ[i] = runSearchExperiment(rskqN, null, null, currentData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes, "RSKQ");
-            f_Search_SKQ[i]  = runSearchExperiment(null, skqN, null, currentData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes, "SKQ");
-            f_Search_Cons1[i]= runSearchExperiment(null, null, cons1N, currentData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes, "Cons1");
+            f_Search_RSKQ[i] = runSearchExperiment(rskqN, null, null, currentScaledData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes);
+            f_Search_SKQ[i]  = runSearchExperiment(null, skqN, null, currentScaledData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes);
+            f_Search_Cons1[i]= runSearchExperiment(null, null, cons1N, currentScaledData, fixedH, 3, div, random, totalSearchLoops, warmUpTimes);
 
             System.out.println("完成.");
-
-            rskqN = null; skqN = null; cons1N = null; currentData = null;
+            rskqN = null; skqN = null; cons1N = null; currentRawData = null; currentScaledData = null;
             System.gc();
         }
 
-        // --------------------------------------------------------
-        // 输出结果到文件
-        // --------------------------------------------------------
+        // 输出结果
         String outFileName = "experiment_2_all_schemes.txt";
         writeExperiment2Results(outFileName, hValues, rValues, nLabels,
                 c_Update_RSKQ, c_Update_SKQ, c_Update_Cons1,
@@ -279,13 +295,29 @@ public class Exp_All_Schemes_Var_H_R_N {
     }
 
     /**
+     * 数据归一化
+     */
+    private static List<FixRangeCompareToConstructionOne.DataRow> normalizeData(List<FixRangeCompareToConstructionOne.DataRow> rawData, int h, long maxX, long maxY) {
+        List<FixRangeCompareToConstructionOne.DataRow> scaledData = new ArrayList<>(rawData.size());
+        long maxVal = (1L << h) - 1;
+        if (maxX == 0) maxX = 1;
+        if (maxY == 0) maxY = 1;
+
+        for (FixRangeCompareToConstructionOne.DataRow row : rawData) {
+            long newX = (row.pointX * maxVal) / maxX;
+            long newY = (row.pointY * maxVal) / maxY;
+            scaledData.add(new FixRangeCompareToConstructionOne.DataRow(row.fileID, newX, newY, row.keywords));
+        }
+        return scaledData;
+    }
+
+    /**
      * 通用 Search 实验运行器
-     * 返回正式搜索的平均耗时 (ms)
      */
     private static double runSearchExperiment(RSKQ_Biginteger rskq, SKQ_Biginteger skq, ConstructionOne cons1,
                                               List<FixRangeCompareToConstructionOne.DataRow> data,
                                               int h, int rPercent, int div, Random random,
-                                              int totalLoops, int warmUp, String label) throws Exception {
+                                              int totalLoops, int warmUp) throws Exception {
         long sumTime = 0;
         int formalCount = totalLoops - warmUp;
         int edgeLength = 1 << h;
@@ -293,7 +325,6 @@ public class Exp_All_Schemes_Var_H_R_N {
         int dataSize = data.size();
 
         for (int i = 0; i < totalLoops; i++) {
-            // Random Query
             int xstart = random.nextInt(Math.max(1, edgeLength - rangeLen));
             int ystart = random.nextInt(Math.max(1, edgeLength - rangeLen));
             FixRangeCompareToConstructionOne.DataRow row = data.get(random.nextInt(dataSize));
@@ -303,17 +334,11 @@ public class Exp_All_Schemes_Var_H_R_N {
                 BigInteger[][] matrix = generateHilbertMatrix(rskq.hilbertCurve, xstart, ystart, rangeLen, rangeLen);
                 rskq.ObjectSearch(matrix, row.keywords);
             } else if (skq != null) {
-                // SKQ Search (requires generated matrix)
-                // Need a temp curve to generate matrix if skq doesn't expose it easily,
-                // but we can assume SKQ class has hilbertCurve or we generate it externally.
-                // SKQ_Biginteger has public 'hilbertCurve'.
                 BigInteger[][] matrix = generateHilbertMatrix(skq.hilbertCurve, xstart, ystart, rangeLen, rangeLen);
                 skq.Search(matrix, row.keywords);
             } else if (cons1 != null) {
-                // Cons1 Search (Range Search)
                 int[] xRange = {xstart, xstart + rangeLen};
                 int[] yRange = {ystart, ystart + rangeLen};
-                // Cons1 rangeConvert logic
                 int[] finalX = cons1.rangeConvert(h, xRange);
                 int[] finalY = cons1.rangeConvert(h, yRange);
                 cons1.clientSearch(finalX, finalY, h);
@@ -333,38 +358,35 @@ public class Exp_All_Schemes_Var_H_R_N {
                                                 double[] eSrchRSKQ, double[] eSrchSKQ, double[] eSrchCons1,
                                                 double[] fSrchRSKQ, double[] fSrchSKQ, double[] fSrchCons1) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
-            writer.write(">>> 实验 2: RSKQ vs SKQ vs Cons1 对比实验结果 <<<\n\n");
+            writer.write(">>> 实验 2: RSKQ vs SKQ vs Cons1 对比实验结果 <<<\n");
+            writer.write("* 注意: 在 Table 4 和 5 中，Cons1 的 Update 是针对 2^h 条数据，而 RSKQ/SKQ 是针对 10W 条数据。\n\n");
 
-            // Table 4: Update Time vs h
-            writer.write("Table 4: Update Time (Total for 10W) vs h (Order)\n");
-            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "h", "RSKQ(ms)", "SKQ(ms)", "Cons1(ms)"));
-            writer.write("-".repeat(55) + "\n");
+            writer.write("Table 4: Update Time (Total) vs h (Order)\n");
+            writer.write(String.format("%-10s | %-12s | %-12s | %-18s\n", "h", "RSKQ(10W)", "SKQ(10W)", "Cons1(2^h)"));
+            writer.write("-".repeat(65) + "\n");
             for (int i=0; i<hVals.length; i++) {
-                writer.write(String.format("%-10d | %-12.4f | %-12.4f | %-12.4f\n", hVals[i], cUpRSKQ[i], cUpSKQ[i], cUpCons1[i]));
+                writer.write(String.format("%-10d | %-12.4f | %-12.4f | %-18.4f\n", hVals[i], cUpRSKQ[i], cUpSKQ[i], cUpCons1[i]));
             }
             writer.write("\n");
 
-            // Table 5: Search Time vs h
             writer.write("Table 5: Search Time (Avg) vs h (Order)\n");
-            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "h", "RSKQ(ms)", "SKQ(ms)", "Cons1(ms)"));
-            writer.write("-".repeat(55) + "\n");
+            writer.write(String.format("%-10s | %-12s | %-12s | %-18s\n", "h", "RSKQ", "SKQ", "Cons1(Subset)"));
+            writer.write("-".repeat(65) + "\n");
             for (int i=0; i<hVals.length; i++) {
-                writer.write(String.format("%-10d | %-12.4f | %-12.4f | %-12.4f\n", hVals[i], dSrchRSKQ[i], dSrchSKQ[i], dSrchCons1[i]));
+                writer.write(String.format("%-10d | %-12.4f | %-12.4f | %-18.4f\n", hVals[i], dSrchRSKQ[i], dSrchSKQ[i], dSrchCons1[i]));
             }
             writer.write("\n");
 
-            // Table 6: Search Time vs R
             writer.write("Table 6: Search Time (Avg) vs R (Range %)\n");
-            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "R(%)", "RSKQ(ms)", "SKQ(ms)", "Cons1(ms)"));
+            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "R(%)", "RSKQ", "SKQ", "Cons1"));
             writer.write("-".repeat(55) + "\n");
             for (int i=0; i<rVals.length; i++) {
                 writer.write(String.format("%-10d | %-12.4f | %-12.4f | %-12.4f\n", rVals[i], eSrchRSKQ[i], eSrchSKQ[i], eSrchCons1[i]));
             }
             writer.write("\n");
 
-            // Table 7: Search Time vs N
             writer.write("Table 7: Search Time (Avg) vs N (Dataset)\n");
-            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "N", "RSKQ(ms)", "SKQ(ms)", "Cons1(ms)"));
+            writer.write(String.format("%-10s | %-12s | %-12s | %-12s\n", "N", "RSKQ", "SKQ", "Cons1(Full N)"));
             writer.write("-".repeat(55) + "\n");
             for (int i=0; i<nLabs.length; i++) {
                 writer.write(String.format("%-10s | %-12.4f | %-12.4f | %-12.4f\n", nLabs[i], fSrchRSKQ[i], fSrchSKQ[i], fSrchCons1[i]));
