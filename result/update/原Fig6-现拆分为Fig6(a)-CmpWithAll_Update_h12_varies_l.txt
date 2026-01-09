@@ -1,0 +1,15 @@
+n	RSKQ12	SKQ12	Construction12
+	s	s	s
+262144	54.675	89.12	1674.207
+524288	55.986	91.26	1674.207
+1048576	56.305	91.78	1674.207
+2097152	56.741	92.49	1674.207
+4194304	56.805	92.59	1674.207
+8388608	58.298	95.03	1674.207
+1.67772E7	58.805	95.85	1674.207
+
+本实验探究在固定的曲线阶数h=12的情况下，不同位图长度l对更新性能的影响。
+本实验结果出现的原因：固定曲线阶数且改变l的大小只会略微影响Update协议中的位图计算部分的耗时，
+所以DSSE\textsubscript{RSKQ}以及DSSE\textsubscript{SKQ}呈现耗时随l增大而近线性增大，且由于DSSE\textsubscript{SKQ}使用了ASHE，
+而DSSE\textsubscript{RSKQ}使用的是基于位操作的布尔电路计算，所以DSSE\textsubscript{RSKQ}耗时低于DSSE\textsubscript{SKQ}。
+对于Construction-I,因其未使用位图，所以搜索耗时不随l变化而变化。
