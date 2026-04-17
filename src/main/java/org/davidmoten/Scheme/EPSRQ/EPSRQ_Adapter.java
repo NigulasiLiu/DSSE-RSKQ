@@ -29,6 +29,7 @@ public final class EPSRQ_Adapter {
     public final List<Double> serverSearchTimes = new ArrayList<>();
 
     private long lastTrapdoorBytes = 0;
+    private long lastUpdateBytes = 0;
 
     public EPSRQ_Adapter(int maxFiles, int h, int lGamma, long seed) {
         this.t = h;
@@ -43,11 +44,20 @@ public final class EPSRQ_Adapter {
         return lastTrapdoorBytes;
     }
 
+    public long getLastUpdateBytes() {
+        return lastUpdateBytes;
+    }
+
     public double update(long[] pSet, String[] keywords, String op, int[] files) {
         long start = System.nanoTime();
+        lastUpdateBytes = 0;
         if ("add".equalsIgnoreCase(op)) {
             int fileId = (files == null || files.length == 0) ? -1 : files[0];
-            builder.addRow(pSet[0], pSet[1], keywords, fileId);
+            EPSRQ_IndexBuilder.UpdateStats st = builder.addRow(pSet[0], pSet[1], keywords, fileId);
+            // update communication estimate: each (real/phantom) location ciphertext ships 2*(4T+4) doubles
+            int dimSpace = builder.getKeyPair().kv2Space.dim;
+            long perCipherBytes = 2L * dimSpace * 8L;
+            lastUpdateBytes = (long) (st.realEntriesAdded + st.phantomsAdded) * perCipherBytes;
         } else {
             // static EPSRQ: ignore delete semantics, but still count time
         }

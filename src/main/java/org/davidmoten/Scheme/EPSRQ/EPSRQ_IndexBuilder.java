@@ -18,6 +18,15 @@ import java.util.Random;
  */
 public final class EPSRQ_IndexBuilder {
 
+    public static final class UpdateStats {
+        public final int realEntriesAdded;
+        public final int phantomsAdded;
+        public UpdateStats(int realEntriesAdded, int phantomsAdded) {
+            this.realEntriesAdded = realEntriesAdded;
+            this.phantomsAdded = phantomsAdded;
+        }
+    }
+
     public static final class EncEntry {
         public final int fileId; // -1 for phantom
         public final EPSRQ_Setup.CipherVector encLoc;
@@ -87,11 +96,14 @@ public final class EPSRQ_IndexBuilder {
         return Math.max(1, dictSize);
     }
 
-    public void addRow(long x, long y, String[] keywords, int fileId) {
-        if (keywords == null) return;
+    public UpdateStats addRow(long x, long y, String[] keywords, int fileId) {
+        if (keywords == null) return new UpdateStats(0, 0);
         int fx = (int) x;
         int fy = (int) y;
         int fid = fileId % maxFiles;
+
+        int realAdded = 0;
+        int phantomAdded = 0;
 
         for (String w : keywords) {
             if (w == null) continue;
@@ -110,19 +122,24 @@ public final class EPSRQ_IndexBuilder {
             EPSRQ_Setup.CipherVector encLoc = setup.encryptIndex(keyPair.kv2Space, locPlain, rnd);
 
             appendEntry(w, new EncEntry(fid, encLoc));
-            padTailBlockIfNeeded(w);
+            realAdded++;
+            phantomAdded += padTailBlockIfNeeded(w);
         }
+        return new UpdateStats(realAdded, phantomAdded);
     }
 
-    public void padTailBlockIfNeeded(String w) {
+    public int padTailBlockIfNeeded(String w) {
         List<Block> blocks = epki.get(w);
-        if (blocks == null || blocks.isEmpty()) return;
+        if (blocks == null || blocks.isEmpty()) return 0;
         Block last = blocks.get(blocks.size() - 1);
+        int added = 0;
         while (last.entries.size() < gamma) {
             double[] phantom = GrayCodeEncoder.randomPhantomLocationVector(t, rnd);
             EPSRQ_Setup.CipherVector encLoc = setup.encryptIndex(keyPair.kv2Space, phantom, rnd);
             last.entries.add(new EncEntry(-1, encLoc));
+            added++;
         }
+        return added;
     }
 
     private void appendEntry(String w, EncEntry e) {
