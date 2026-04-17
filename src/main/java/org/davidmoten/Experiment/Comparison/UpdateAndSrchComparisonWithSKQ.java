@@ -2,7 +2,7 @@ package org.davidmoten.Experiment.Comparison;
 
 import org.davidmoten.Scheme.RSKQ.RSKQ_Biginteger;
 import org.davidmoten.Scheme.SKQ.SKQ_Biginteger;
-import org.davidmoten.Scheme.EPSRQ.EPSRQScheme;
+import org.davidmoten.Scheme.EPSRQ.EPSRQ_Adapter;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -80,7 +80,7 @@ public class UpdateAndSrchComparisonWithSKQ {
                 // 初始化两个方案的实例
                 RSKQ_Biginteger rskq = new RSKQ_Biginteger(maxFiles, hilbertOrder, 2);
                 SKQ_Biginteger skq = new SKQ_Biginteger(128, rangePredicate, maxFiles, hilbertOrder, 2);
-                EPSRQScheme epsrq = new EPSRQScheme(maxFiles, hilbertOrder, maxFiles);
+                EPSRQ_Adapter epsrq = new EPSRQ_Adapter(maxFiles, hilbertOrder, maxFiles, 2026L);
 
                 // ==========================================
                 // Phase 1: Update 性能测试
