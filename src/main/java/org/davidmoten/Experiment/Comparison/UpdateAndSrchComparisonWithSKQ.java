@@ -2,11 +2,13 @@ package org.davidmoten.Experiment.Comparison;
 
 import org.davidmoten.Scheme.RSKQ.RSKQ_Biginteger;
 import org.davidmoten.Scheme.SKQ.SKQ_Biginteger;
+import org.davidmoten.Scheme.EPSRQ.EPSRQScheme;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -49,6 +51,12 @@ public class UpdateAndSrchComparisonWithSKQ {
         double[][] skqSearchTotalRes = new double[rows][cols];
         double[][] skqSearchAvgRes = new double[rows][cols];
 
+        // EPSRQ 结果存储
+        double[][] epsrqUpdateTotalRes = new double[rows][cols];
+        double[][] epsrqUpdateAvgRes = new double[rows][cols];
+        double[][] epsrqSearchTotalRes = new double[rows][cols];
+        double[][] epsrqSearchAvgRes = new double[rows][cols];
+
         Random random = new Random();
 
         System.out.printf("正在加载数据文件：%s ...\n", filepath);
@@ -72,6 +80,7 @@ public class UpdateAndSrchComparisonWithSKQ {
                 // 初始化两个方案的实例
                 RSKQ_Biginteger rskq = new RSKQ_Biginteger(maxFiles, hilbertOrder, 2);
                 SKQ_Biginteger skq = new SKQ_Biginteger(128, rangePredicate, maxFiles, hilbertOrder, 2);
+                EPSRQScheme epsrq = new EPSRQScheme(maxFiles, hilbertOrder, maxFiles);
 
                 // ==========================================
                 // Phase 1: Update 性能测试
@@ -80,6 +89,7 @@ public class UpdateAndSrchComparisonWithSKQ {
 
                 long rskqTotalUpdateNano = 0;
                 long skqTotalUpdateNano = 0;
+                long epsrqTotalUpdateNano = 0;
 
                 // 遍历所有数据行进行插入
                 for (FixRangeCompareToConstructionOne.DataRow row : dataRows) {
@@ -100,23 +110,35 @@ public class UpdateAndSrchComparisonWithSKQ {
                     skq.update(pSet, keywords, "del", new int[]{(row.fileID + 1) % maxFiles}, rangePredicate);
                     end = System.nanoTime();
                     skqTotalUpdateNano += (end - start);
+
+                    // --- 测试 EPSRQ Update (static compromise) ---
+                    start = System.nanoTime();
+                    epsrq.update(pSet, keywords, "add", new int[]{row.fileID});
+                    epsrq.update(pSet, keywords, "del", new int[]{(row.fileID + 1) % maxFiles});
+                    end = System.nanoTime();
+                    epsrqTotalUpdateNano += (end - start);
                 }
 
                 // 计算统计结果 (毫秒)
                 double rskqTotalUpdateMs = rskqTotalUpdateNano / 1e6;
                 double skqTotalUpdateMs = skqTotalUpdateNano / 1e6;
+                double epsrqTotalUpdateMs = epsrqTotalUpdateNano / 1e6;
                 double rskqAvgUpdateMs = rskqTotalUpdateMs / dataSize; // 注意：这里分母是 dataSize，虽然每次循环做了2次操作(add/del)，但通常视为处理一条数据的平均耗时
                 double skqAvgUpdateMs = skqTotalUpdateMs / dataSize;
+                double epsrqAvgUpdateMs = epsrqTotalUpdateMs / dataSize;
 
                 // 存储结果
                 rskqUpdateTotalRes[r][c] = rskqTotalUpdateMs;
                 rskqUpdateAvgRes[r][c] = rskqAvgUpdateMs;
                 skqUpdateTotalRes[r][c] = skqTotalUpdateMs;
                 skqUpdateAvgRes[r][c] = skqAvgUpdateMs;
+                epsrqUpdateTotalRes[r][c] = epsrqTotalUpdateMs;
+                epsrqUpdateAvgRes[r][c] = epsrqAvgUpdateMs;
 
                 System.out.printf("    Update 完成 (%d 次):\n", dataSize);
                 System.out.printf("    [RSKQ] 总耗时: %10.4f ms | 平均耗时: %10.6f ms\n", rskqTotalUpdateMs, rskqAvgUpdateMs);
                 System.out.printf("    [SKQ ] 总耗时: %10.4f ms | 平均耗时: %10.6f ms\n", skqTotalUpdateMs, skqAvgUpdateMs);
+                System.out.printf("    [EPSRQ] 总耗时: %10.4f ms | 平均耗时: %10.6f ms\n", epsrqTotalUpdateMs, epsrqAvgUpdateMs);
 
                 // ==========================================
                 // Phase 2: Search 性能测试
@@ -136,8 +158,10 @@ public class UpdateAndSrchComparisonWithSKQ {
 
                 long rskqTotalSearchNano10k = 0; // 10000次的总耗时
                 long skqTotalSearchNano10k = 0;  // 10000次的总耗时
+                long epsrqTotalSearchNano10k = 0;
                 long rskqFormalSearchNano = 0;   // 仅正式1000次的耗时
                 long skqFormalSearchNano = 0;    // 仅正式1000次的耗时
+                long epsrqFormalSearchNano = 0;
 
                 // 执行 10000 次搜索
                 for (int i = 0; i < totalSearchLoops; i++) {
@@ -163,39 +187,58 @@ public class UpdateAndSrchComparisonWithSKQ {
                     if (i >= warmUpTimes) {
                         skqFormalSearchNano += duration;
                     }
+
+                    // --- 测试 EPSRQ Search (use same rectangle params) ---
+                    start = System.nanoTime();
+                    epsrq.searchRect(xstart, ystart, searchRange, queryKw);
+                    end = System.nanoTime();
+                    duration = end - start;
+                    epsrqTotalSearchNano10k += duration;
+                    if (i >= warmUpTimes) {
+                        epsrqFormalSearchNano += duration;
+                    }
                 }
 
                 // 计算 Search 统计结果
                 double rskqTotalSearch10kMs = rskqTotalSearchNano10k / 1e6;
                 double skqTotalSearch10kMs = skqTotalSearchNano10k / 1e6;
+                double epsrqTotalSearch10kMs = epsrqTotalSearchNano10k / 1e6;
                 double rskqAvgFormalMs = (rskqFormalSearchNano / 1e6) / formalTimes;
                 double skqAvgFormalMs = (skqFormalSearchNano / 1e6) / formalTimes;
+                double epsrqAvgFormalMs = (epsrqFormalSearchNano / 1e6) / formalTimes;
 
                 // 存储结果
                 rskqSearchTotalRes[r][c] = rskqTotalSearch10kMs;
                 rskqSearchAvgRes[r][c] = rskqAvgFormalMs;
                 skqSearchTotalRes[r][c] = skqTotalSearch10kMs;
                 skqSearchAvgRes[r][c] = skqAvgFormalMs;
+                epsrqSearchTotalRes[r][c] = epsrqTotalSearch10kMs;
+                epsrqSearchAvgRes[r][c] = epsrqAvgFormalMs;
 
                 System.out.printf("    Search 完成 (共 %d 次):\n", totalSearchLoops);
                 System.out.printf("    [RSKQ] 10000次总耗时: %10.4f ms | 正式阶段(1000次)平均耗时: %10.6f ms\n",
                         rskqTotalSearch10kMs, rskqAvgFormalMs);
                 System.out.printf("    [SKQ ] 10000次总耗时: %10.4f ms | 正式阶段(1000次)平均耗时: %10.6f ms\n",
                         skqTotalSearch10kMs, skqAvgFormalMs);
+                System.out.printf("    [EPSRQ] 10000次总耗时: %10.4f ms | 正式阶段(1000次)平均耗时: %10.6f ms\n",
+                        epsrqTotalSearch10kMs, epsrqAvgFormalMs);
 
                 // 清理状态
                 rskq.clearSearchTime();
                 rskq.clearUpdateTime();
                 skq.clearSearchTime();
                 skq.clearUpdateTime();
+                epsrq.clearSearchTime();
+                epsrq.clearUpdateTime();
             }
             System.out.println("==================================================");
         }
 
         // 5. 写入结果到文件
-        writeResultsToFile("experiment_results.txt", powers, hilbertOrders,
+        writeResultsToFile3("experiment_results.txt", powers, hilbertOrders,
                 rskqUpdateTotalRes, rskqUpdateAvgRes, rskqSearchTotalRes, rskqSearchAvgRes,
-                skqUpdateTotalRes, skqUpdateAvgRes, skqSearchTotalRes, skqSearchAvgRes);
+                skqUpdateTotalRes, skqUpdateAvgRes, skqSearchTotalRes, skqSearchAvgRes,
+                epsrqUpdateTotalRes, epsrqUpdateAvgRes, epsrqSearchTotalRes, epsrqSearchAvgRes);
 
         System.out.println("所有实验结束，结果已保存至 experiment_results.txt");
     }
@@ -225,6 +268,44 @@ public class UpdateAndSrchComparisonWithSKQ {
             writeSingleTable(writer, "SKQ - Update Average Time (ms)", powers, orders, skqUpAvg);
             writeSingleTable(writer, "SKQ - Search Total Time (10000 times) (ms)", powers, orders, skqSearchTotal);
             writeSingleTable(writer, "SKQ - Search Average Time (Formal) (ms)", powers, orders, skqSearchAvg);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void writeResultsToFile3(String fileName, int[] powers, int[] orders,
+                                            double[][] rskqUpTotal, double[][] rskqUpAvg,
+                                            double[][] rskqSearchTotal, double[][] rskqSearchAvg,
+                                            double[][] skqUpTotal, double[][] skqUpAvg,
+                                            double[][] skqSearchTotal, double[][] skqSearchAvg,
+                                            double[][] epsrqUpTotal, double[][] epsrqUpAvg,
+                                            double[][] epsrqSearchTotal, double[][] epsrqSearchAvg) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
+            writer.write("实验结果汇总\n");
+            writer.write("数据集: 10W, Search Range: 3%\n\n");
+
+            // --- RSKQ ---
+            writeSingleTable(writer, "RSKQ - Update Total Time (ms)", powers, orders, rskqUpTotal);
+            writeSingleTable(writer, "RSKQ - Update Average Time (ms)", powers, orders, rskqUpAvg);
+            writeSingleTable(writer, "RSKQ - Search Total Time (10000 times) (ms)", powers, orders, rskqSearchTotal);
+            writeSingleTable(writer, "RSKQ - Search Average Time (Formal) (ms)", powers, orders, rskqSearchAvg);
+
+            writer.write("\n------------------------------------------------------------\n\n");
+
+            // --- SKQ ---
+            writeSingleTable(writer, "SKQ - Update Total Time (ms)", powers, orders, skqUpTotal);
+            writeSingleTable(writer, "SKQ - Update Average Time (ms)", powers, orders, skqUpAvg);
+            writeSingleTable(writer, "SKQ - Search Total Time (10000 times) (ms)", powers, orders, skqSearchTotal);
+            writeSingleTable(writer, "SKQ - Search Average Time (Formal) (ms)", powers, orders, skqSearchAvg);
+
+            writer.write("\n------------------------------------------------------------\n\n");
+
+            // --- EPSRQ ---
+            writeSingleTable(writer, "EPSRQ - Update Total Time (ms)", powers, orders, epsrqUpTotal);
+            writeSingleTable(writer, "EPSRQ - Update Average Time (ms)", powers, orders, epsrqUpAvg);
+            writeSingleTable(writer, "EPSRQ - Search Total Time (10000 times) (ms)", powers, orders, epsrqSearchTotal);
+            writeSingleTable(writer, "EPSRQ - Search Average Time (Formal) (ms)", powers, orders, epsrqSearchAvg);
 
         } catch (IOException e) {
             e.printStackTrace();
