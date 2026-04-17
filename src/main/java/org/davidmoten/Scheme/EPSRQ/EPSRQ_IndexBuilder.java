@@ -1,176 +1,221 @@
 package org.davidmoten.Scheme.EPSRQ;
 
+import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * EPSRQ_IndexBuilder:
- * - vectorize (text + location)
- * - build EPKI (equal partition inverted index) with block size gamma
- * - generate phantom vectors for padding and encrypt them
- *
- * Memory note:
- * - store ciphertext as primitive double[] only
- * - pad only the tail block per keyword eagerly (as required by prompt)
+ * - fixed text dimension m=8000 (global dictionary)
+ * - space dimension = 4T+1 (+3 in EASPE key => 4T+4)
+ * - offline build EPKI with strict gamma padding
  */
 public final class EPSRQ_IndexBuilder {
 
-    public static final class UpdateStats {
-        public final int realEntriesAdded;
-        public final int phantomsAdded;
-        public UpdateStats(int realEntriesAdded, int phantomsAdded) {
-            this.realEntriesAdded = realEntriesAdded;
-            this.phantomsAdded = phantomsAdded;
-        }
-    }
-
-    public static final class EncEntry {
-        public final int fileId; // -1 for phantom
+    public static final class EncryptedLocation {
+        public final int fileId; // -1 means phantom
         public final EPSRQ_Setup.CipherVector encLoc;
-        public EncEntry(int fileId, EPSRQ_Setup.CipherVector encLoc) {
+        public EncryptedLocation(int fileId, EPSRQ_Setup.CipherVector encLoc) {
             this.fileId = fileId;
             this.encLoc = encLoc;
         }
     }
 
-    public static final class Block {
-        public final List<EncEntry> entries;
-        public Block(int gamma) {
-            this.entries = new ArrayList<>(gamma);
+    public static final class BuildStats {
+        public final int dictionarySize;
+        public final int realLocations;
+        public final int phantomLocations;
+        public final int keywordCount;
+        public BuildStats(int dictionarySize, int realLocations, int phantomLocations, int keywordCount) {
+            this.dictionarySize = dictionarySize;
+            this.realLocations = realLocations;
+            this.phantomLocations = phantomLocations;
+            this.keywordCount = keywordCount;
         }
     }
+
+    private static final int FIXED_TEXT_DIM = 8000;
 
     private final int t;
     private final int gamma;
     private final int maxFiles;
     private final Random rnd;
 
-    private final Map<String, Integer> dict;
-    private int dictSize;
-
     private EPSRQ_Setup.SetupKeyPair keyPair;
     private final EPSRQ_Setup setup;
 
-    // encrypted keyword basis for EPKI keyword check
+    private final Map<String, Integer> dict;
+    private final List<String> dictionaryKeywords;
     private final Map<String, EPSRQ_Setup.CipherVector> encKeywordBasis;
-
-    // EPKI: keyword -> blocks
-    private final Map<String, List<Block>> epki;
+    private final Map<String, List<EncryptedLocation>> epki;
 
     public EPSRQ_IndexBuilder(int maxFiles, int t, int gamma, long seed) {
         this.t = t;
         this.gamma = Math.max(1, gamma);
         this.maxFiles = Math.max(1, maxFiles);
         this.rnd = new Random(seed);
-        this.dict = new HashMap<>();
-        this.dictSize = 0;
+        this.dict = new HashMap<>(FIXED_TEXT_DIM * 2);
+        this.dictionaryKeywords = new ArrayList<>(FIXED_TEXT_DIM);
         this.setup = new EPSRQ_Setup(seed);
         this.encKeywordBasis = new HashMap<>();
         this.epki = new HashMap<>();
     }
 
-    public void ensureSetup() {
-        if (keyPair == null) {
-            // dictSize may still grow; kv1 will be regenerated when dict grows
-            this.keyPair = setup.setup(Math.max(1, dictSize), t);
-        }
-    }
-
     public EPSRQ_Setup.SetupKeyPair getKeyPair() {
-        ensureSetup();
+        if (keyPair == null) {
+            this.keyPair = setup.setup(FIXED_TEXT_DIM, t);
+        }
         return keyPair;
     }
 
-    public Map<String, List<Block>> getEpki() {
+    public Map<String, List<EncryptedLocation>> getEpki() {
         return epki;
     }
 
-    public EPSRQ_Setup.CipherVector getEncKeywordBasis(String w) {
-        return encKeywordBasis.get(w);
+    public Map<String, EPSRQ_Setup.CipherVector> getEncKeywordBasis() {
+        return encKeywordBasis;
     }
 
-    public int getDictSize() {
-        return Math.max(1, dictSize);
+    public List<String> getDictionaryKeywords() {
+        return dictionaryKeywords;
     }
 
-    public UpdateStats addRow(long x, long y, String[] keywords, int fileId) {
-        if (keywords == null) return new UpdateStats(0, 0);
-        int fx = (int) x;
-        int fy = (int) y;
-        int fid = fileId % maxFiles;
+    public BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+        dict.clear();
+        dictionaryKeywords.clear();
+        encKeywordBasis.clear();
+        epki.clear();
 
-        int realAdded = 0;
-        int phantomAdded = 0;
+        if (keyPair == null) {
+            keyPair = setup.setup(FIXED_TEXT_DIM, t);
+        }
 
-        for (String w : keywords) {
-            if (w == null) continue;
-            int before = dictSize;
-            dict.computeIfAbsent(w, k -> dictSize++);
-            if (dictSize != before) {
-                // dict grew => regenerate kv1 text keys as per (m+3)x(m+3)
-                this.keyPair = setup.setup(Math.max(1, dictSize), t);
-                encKeywordBasis.clear();
+        Set<String> unique = new TreeSet<>();
+        if (allData != null) {
+            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+                if (row == null || row.keywords == null) {
+                    continue;
+                }
+                for (String w : row.keywords) {
+                    if (w != null && !w.isEmpty()) {
+                        unique.add(w);
+                    }
+                }
             }
-            ensureSetup();
-
-            encKeywordBasis.computeIfAbsent(w, kw -> encryptKeywordBasis(kw));
-
-            double[] locPlain = GrayCodeEncoder.encodePointLocationVector(fx, fy, t); // (4T+1)
-            EPSRQ_Setup.CipherVector encLoc = setup.encryptIndex(keyPair.kv2Space, locPlain, rnd);
-
-            appendEntry(w, new EncEntry(fid, encLoc));
-            realAdded++;
-            phantomAdded += padTailBlockIfNeeded(w);
         }
-        return new UpdateStats(realAdded, phantomAdded);
-    }
 
-    public int padTailBlockIfNeeded(String w) {
-        List<Block> blocks = epki.get(w);
-        if (blocks == null || blocks.isEmpty()) return 0;
-        Block last = blocks.get(blocks.size() - 1);
-        int added = 0;
-        while (last.entries.size() < gamma) {
-            double[] phantom = GrayCodeEncoder.randomPhantomLocationVector(t, rnd);
-            EPSRQ_Setup.CipherVector encLoc = setup.encryptIndex(keyPair.kv2Space, phantom, rnd);
-            last.entries.add(new EncEntry(-1, encLoc));
-            added++;
+        List<String> sorted = new ArrayList<>(unique);
+        Collections.sort(sorted, Comparator.naturalOrder());
+        int capped = Math.min(FIXED_TEXT_DIM, sorted.size());
+        for (int i = 0; i < capped; i++) {
+            String w = sorted.get(i);
+            dict.put(w, i);
+            dictionaryKeywords.add(w);
         }
-        return added;
-    }
 
-    private void appendEntry(String w, EncEntry e) {
-        List<Block> blocks = epki.computeIfAbsent(w, k -> new ArrayList<>());
-        if (blocks.isEmpty() || blocks.get(blocks.size() - 1).entries.size() >= gamma) {
-            blocks.add(new Block(gamma));
+        // If dataset has fewer than 8000 terms, reserve the rest as synthetic placeholders.
+        for (int i = capped; i < FIXED_TEXT_DIM; i++) {
+            String placeholder = "__epsrq_pad_kw_" + i;
+            dict.put(placeholder, i);
+            dictionaryKeywords.add(placeholder);
         }
-        blocks.get(blocks.size() - 1).entries.add(e);
-    }
 
-    private EPSRQ_Setup.CipherVector encryptKeywordBasis(String w) {
-        // basis vector in m dims
-        int m = Math.max(1, dictSize);
-        double[] base = new double[m];
-        Integer idx = dict.get(w);
-        if (idx != null && idx >= 0 && idx < m) base[idx] = 1.0;
+        for (Map.Entry<String, Integer> e : dict.entrySet()) {
+            encKeywordBasis.put(e.getKey(), encryptKeywordBasisByIndex(e.getValue()));
+        }
 
-        return setup.encryptIndex(keyPair.kv1Text, base, rnd);
+        Map<String, List<int[]>> rawPosting = new LinkedHashMap<>(dict.size() * 2);
+        for (String w : dictionaryKeywords) {
+            rawPosting.put(w, new ArrayList<int[]>());
+        }
+
+        int realCount = 0;
+        if (allData != null) {
+            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+                if (row == null || row.keywords == null) {
+                    continue;
+                }
+                int fid = normalizeFileId(row.fileID);
+                int x = (int) row.pointX;
+                int y = (int) row.pointY;
+                for (String w : row.keywords) {
+                    if (w == null || w.isEmpty()) {
+                        continue;
+                    }
+                    if (!dict.containsKey(w)) {
+                        continue;
+                    }
+                    rawPosting.get(w).add(new int[]{fid, x, y});
+                    realCount++;
+                }
+            }
+        }
+
+        int phantomCount = 0;
+        for (String w : dictionaryKeywords) {
+            List<int[]> postings = rawPosting.get(w);
+            if (postings == null) {
+                postings = new ArrayList<int[]>();
+            }
+            List<EncryptedLocation> out = new ArrayList<EncryptedLocation>(alignToGamma(postings.size()));
+            for (int[] item : postings) {
+                double[] loc = GrayCodeEncoder.encodePointLocationVector(item[1], item[2], t);
+                EPSRQ_Setup.CipherVector enc = setup.encryptIndex(keyPair.kv2Space, loc, rnd);
+                out.add(new EncryptedLocation(item[0], enc));
+            }
+            int missing = alignToGamma(postings.size()) - postings.size();
+            for (int i = 0; i < missing; i++) {
+                double[] phantom = GrayCodeEncoder.randomPhantomLocationVector(t, rnd);
+                EPSRQ_Setup.CipherVector enc = setup.encryptIndex(keyPair.kv2Space, phantom, rnd);
+                out.add(new EncryptedLocation(-1, enc));
+                phantomCount++;
+            }
+            epki.put(w, out);
+        }
+
+        return new BuildStats(FIXED_TEXT_DIM, realCount, phantomCount, dictionaryKeywords.size());
     }
 
     public double[] keywordQueryVectorOr(String[] queryKeywords) {
-        int m = Math.max(1, dictSize);
-        double[] q = new double[m];
-        if (queryKeywords == null) return q;
+        double[] q = new double[FIXED_TEXT_DIM];
+        if (queryKeywords == null) {
+            return q;
+        }
         for (String w : queryKeywords) {
             Integer idx = dict.get(w);
-            if (idx != null && idx >= 0 && idx < m) q[idx] = 1.0; // bitwise OR
+            if (idx != null && idx >= 0 && idx < FIXED_TEXT_DIM) {
+                q[idx] = 1.0;
+            }
         }
         return q;
     }
 
-    // randoms are embedded in EASPEKey (r1,r2,r3)
+    private EPSRQ_Setup.CipherVector encryptKeywordBasisByIndex(int idx) {
+        double[] base = new double[FIXED_TEXT_DIM];
+        base[idx] = 1.0;
+        return setup.encryptIndex(keyPair.kv1Text, base, rnd);
+    }
+
+    private int alignToGamma(int size) {
+        if (size <= 0) {
+            return gamma;
+        }
+        int mod = size % gamma;
+        return mod == 0 ? size : (size + (gamma - mod));
+    }
+
+    private int normalizeFileId(int fid) {
+        int v = fid % maxFiles;
+        return v < 0 ? v + maxFiles : v;
+    }
 }
 

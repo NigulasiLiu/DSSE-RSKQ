@@ -1,28 +1,36 @@
 package org.davidmoten.Scheme.EPSRQ;
 
+import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * EPSRQ_Adapter:
- * - expose update/search methods compatible with current benchmark loops
- * - h -> T, l -> gamma mapping is applied by constructor arguments
- * - simulate update for static EPSRQ (append + padding)
- * - track nanoTime and trapdoor "communication size" (bytes)
+ * - static EPSRQ benchmark adapter
+ * - fixed dictionary dimension m=8000
+ * - fixed partition threshold gamma=1000
+ * - support offline buildIndex and compatibility update() buffering
  */
 public final class EPSRQ_Adapter {
 
     private static final double ZERO_EPS = 1e-6;
+    private static final int FIXED_GAMMA = 1000;
 
     private final int t;
-    private final int gamma;
     private final int maxFiles;
     private final Random rnd;
 
     private final EPSRQ_IndexBuilder builder;
+    // Prevent JIT dead-code elimination in tight loops when caller ignores results.
+    private volatile long searchBlackhole = 0L;
+    private volatile boolean built = false;
+    private final List<FixRangeCompareToConstructionOne.DataRow> stagedRows = new ArrayList<FixRangeCompareToConstructionOne.DataRow>();
 
     public final List<Double> totalUpdateTimes = new ArrayList<>();
     public final List<Double> clientSearchTimes = new ArrayList<>();
@@ -33,11 +41,10 @@ public final class EPSRQ_Adapter {
 
     public EPSRQ_Adapter(int maxFiles, int h, int lGamma, long seed) {
         this.t = h;
-        this.gamma = Math.max(1, lGamma);
         this.maxFiles = Math.max(1, maxFiles);
         this.rnd = new Random(seed);
-        this.builder = new EPSRQ_IndexBuilder(this.maxFiles, this.t, this.gamma, seed);
-        this.builder.ensureSetup();
+        this.builder = new EPSRQ_IndexBuilder(this.maxFiles, this.t, FIXED_GAMMA, seed);
+        this.builder.getKeyPair();
     }
 
     public long getLastTrapdoorBytes() {
@@ -53,11 +60,12 @@ public final class EPSRQ_Adapter {
         lastUpdateBytes = 0;
         if ("add".equalsIgnoreCase(op)) {
             int fileId = (files == null || files.length == 0) ? -1 : files[0];
-            EPSRQ_IndexBuilder.UpdateStats st = builder.addRow(pSet[0], pSet[1], keywords, fileId);
-            // update communication estimate: each (real/phantom) location ciphertext ships 2*(4T+4) doubles
+            stagedRows.add(new FixRangeCompareToConstructionOne.DataRow(fileId, pSet[0], pSet[1], keywords));
+            built = false;
             int dimSpace = builder.getKeyPair().kv2Space.dim;
             long perCipherBytes = 2L * dimSpace * 8L;
-            lastUpdateBytes = (long) (st.realEntriesAdded + st.phantomsAdded) * perCipherBytes;
+            // Compatibility mode: one buffered add corresponds to one encrypted location payload.
+            lastUpdateBytes = perCipherBytes;
         } else {
             // static EPSRQ: ignore delete semantics, but still count time
         }
@@ -70,6 +78,7 @@ public final class EPSRQ_Adapter {
      * Search rectangle [xStart, xStart+rangeLen] x [yStart, yStart+rangeLen] using SGR-range decomposition.
      */
     public List<Integer> searchRect(int xStart, int yStart, int rangeLen, String[] queryKeywords) {
+        ensureBuilt();
         long clientStart = System.nanoTime();
 
         EPSRQ_Setup.SetupKeyPair kp = builder.getKeyPair();
@@ -104,6 +113,13 @@ public final class EPSRQ_Adapter {
         List<Integer> res = serverSearch(tdText, tdLocList, queryKeywords);
         long serverEnd = System.nanoTime();
 
+        // Consume result to keep search loop observable for JVM optimizer.
+        long bh = res.size();
+        for (int id : res) {
+            bh = 31L * bh + id;
+        }
+        searchBlackhole ^= bh;
+
         clientSearchTimes.add((clientEnd - clientStart) / 1e6);
         serverSearchTimes.add((serverEnd - serverStart) / 1e6);
         return res;
@@ -113,42 +129,81 @@ public final class EPSRQ_Adapter {
                                        List<EPSRQ_Setup.CipherVector> tdLocList,
                                        String[] queryKeywords) {
         if (queryKeywords == null || queryKeywords.length == 0) return new ArrayList<>();
-        Map<String, List<EPSRQ_IndexBuilder.Block>> epki = builder.getEpki();
+        Map<String, List<EPSRQ_IndexBuilder.EncryptedLocation>> epki = builder.getEpki();
+        Map<String, EPSRQ_Setup.CipherVector> encBasis = builder.getEncKeywordBasis();
+        List<String> allKeywords = builder.getDictionaryKeywords();
 
         Map<Integer, Boolean> seen = new HashMap<>();
         List<Integer> out = new ArrayList<>();
-        EPSRQ_Setup s = new EPSRQ_Setup(0);
-
+        Set<String> querySet = new HashSet<String>();
         for (String w : queryKeywords) {
-            if (w == null) continue;
-            List<EPSRQ_IndexBuilder.Block> blocks = epki.get(w);
-            if (blocks == null) continue;
+            if (w != null) {
+                querySet.add(w);
+            }
+        }
 
-            EPSRQ_Setup.CipherVector encKwBasis = builder.getEncKeywordBasis(w);
-            if (encKwBasis == null) continue;
+        // Scan dictionary keywords and evaluate encrypted keyword-match against OR trapdoor.
+        for (String w : allKeywords) {
+            EPSRQ_Setup.CipherVector encKwBasis = encBasis.get(w);
+            if (encKwBasis == null) {
+                continue;
+            }
 
             double kwIP = EPSRQ_Setup.innerProduct(encKwBasis, tdText);
-            if (Math.abs(kwIP) <= ZERO_EPS) continue; // KeywordInnerProduct != 0 required
+            if (Math.abs(kwIP) <= ZERO_EPS) {
+                continue;
+            }
+            // Keep semantic consistency: only query keywords can contribute final hits.
+            if (!querySet.contains(w)) {
+                continue;
+            }
 
-            for (EPSRQ_IndexBuilder.Block b : blocks) {
-                for (EPSRQ_IndexBuilder.EncEntry e : b.entries) {
-                    if (e.fileId < 0) continue; // phantom
-                    boolean match = false;
-                    for (EPSRQ_Setup.CipherVector tdLoc : tdLocList) {
-                        double locIP = EPSRQ_Setup.innerProduct(e.encLoc, tdLoc);
-                        if (Math.abs(locIP) <= ZERO_EPS) {
-                            match = true;
-                            break;
-                        }
+            List<EPSRQ_IndexBuilder.EncryptedLocation> posting = epki.get(w);
+            if (posting == null) {
+                continue;
+            }
+
+            // Full scan includes phantom tuples; no shortcut per block.
+            for (EPSRQ_IndexBuilder.EncryptedLocation e : posting) {
+                boolean locMatch = false;
+                for (EPSRQ_Setup.CipherVector tdLoc : tdLocList) {
+                    double locIP = EPSRQ_Setup.innerProduct(e.encLoc, tdLoc);
+                    if (Math.abs(locIP) <= ZERO_EPS) {
+                        locMatch = true;
+                        break;
                     }
-                    if (match && !seen.containsKey(e.fileId)) {
-                        seen.put(e.fileId, Boolean.TRUE);
-                        out.add(e.fileId);
-                    }
+                }
+                if (locMatch && e.fileId >= 0 && !seen.containsKey(e.fileId)) {
+                    seen.put(e.fileId, Boolean.TRUE);
+                    out.add(e.fileId);
                 }
             }
         }
         return out;
+    }
+
+    public EPSRQ_IndexBuilder.BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+        EPSRQ_IndexBuilder.BuildStats st = builder.buildIndex(allData);
+        built = true;
+        stagedRows.clear();
+        return st;
+    }
+
+    private void ensureBuilt() {
+        if (built) {
+            return;
+        }
+        if (!stagedRows.isEmpty()) {
+            builder.buildIndex(stagedRows);
+            built = true;
+            return;
+        }
+        builder.buildIndex(new ArrayList<FixRangeCompareToConstructionOne.DataRow>());
+        built = true;
+    }
+
+    public long getSearchBlackhole() {
+        return searchBlackhole;
     }
 
     public void clearUpdateTime() {

@@ -18,7 +18,7 @@ import java.util.Random;
  *
  * 参数语义映射:
  * - h -> T
- * - l(固定 2^20) -> gamma(固定 2^20, 同时作为 maxFiles)
+ * - l(固定 2^20) -> maxFiles, gamma 固定为 1000
  */
 public final class EPSRQ_Exp_Var_H_R_N {
 
@@ -33,6 +33,8 @@ public final class EPSRQ_Exp_Var_H_R_N {
         int formalTimes = 1000;
         int totalLoops = warmUpTimes + formalTimes;
         long seed = 20260105L;
+        System.out.println("[Init] Start EPSRQ_Exp_Var_H_R_N");
+        System.out.println("[Init] Loading dataset: " + basePath + "10W.csv");
         Random random = new Random(seed);
 
         int[] hValues = {8, 10, 12};
@@ -43,48 +45,60 @@ public final class EPSRQ_Exp_Var_H_R_N {
         double[] dSearch = new double[hValues.length];
         double[] eSearch = new double[rValues.length];
         double[] fSearch = new double[nLabels.length];
+        int totalTasks = hValues.length + rValues.length + nLabels.length;
+        int doneTasks = 0;
 
         List<FixRangeCompareToConstructionOne.DataRow> raw10W =
                 FixRangeCompareToConstructionOne.loadDataFromFile(basePath + "10W.csv");
+        System.out.println("[Init] Dataset 10W loaded, rows=" + raw10W.size());
 
         for (int i = 0; i < hValues.length; i++) {
             int h = hValues[i];
+            System.out.printf("[Stage] C&D(h) preparing data: h=%d%n", h);
             List<FixRangeCompareToConstructionOne.DataRow> data = normalizeData(raw10W, h);
             EPSRQ_Adapter epsrq = new EPSRQ_Adapter(fixedL, h, fixedL, seed);
 
+            System.out.printf("[Stage] C&D(h) buildIndex begin: h=%d, n=%d%n", h, data.size());
             long upStart = System.nanoTime();
-            for (FixRangeCompareToConstructionOne.DataRow row : data) {
-                epsrq.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID % fixedL});
-            }
+            epsrq.buildIndex(data);
             long upEnd = System.nanoTime();
+            System.out.printf("[Stage] C&D(h) buildIndex done: h=%d%n", h);
             cUpdate[i] = (upEnd - upStart) / 1e6;
 
             dSearch[i] = runSearch(epsrq, data, h, 3, div, random, totalLoops, warmUpTimes, formalTimes);
+            doneTasks++;
+            printProgress("C&D(h)", doneTasks, totalTasks);
         }
 
         int fixedH = 10;
         List<FixRangeCompareToConstructionOne.DataRow> fixedData = normalizeData(raw10W, fixedH);
         EPSRQ_Adapter epsrqFixed = new EPSRQ_Adapter(fixedL, fixedH, fixedL, seed);
-        for (FixRangeCompareToConstructionOne.DataRow row : fixedData) {
-            epsrqFixed.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID % fixedL});
-        }
+        System.out.printf("[Stage] E(R) buildIndex begin: h=%d, n=%d%n", fixedH, fixedData.size());
+        epsrqFixed.buildIndex(fixedData);
+        System.out.println("[Stage] E(R) buildIndex done");
         for (int i = 0; i < rValues.length; i++) {
             eSearch[i] = runSearch(epsrqFixed, fixedData, fixedH, rValues[i], div, random, totalLoops, warmUpTimes, formalTimes);
+            doneTasks++;
+            printProgress("E(R)", doneTasks, totalTasks);
         }
 
         for (int i = 0; i < nLabels.length; i++) {
             String label = nLabels[i];
+            System.out.println("[Stage] F(N) loading dataset: " + basePath + label + ".csv");
             List<FixRangeCompareToConstructionOne.DataRow> raw =
                     FixRangeCompareToConstructionOne.loadDataFromFile(basePath + label + ".csv");
             List<FixRangeCompareToConstructionOne.DataRow> data = normalizeData(raw, fixedH);
             EPSRQ_Adapter epsrq = new EPSRQ_Adapter(fixedL, fixedH, fixedL, seed);
-            for (FixRangeCompareToConstructionOne.DataRow row : data) {
-                epsrq.update(new long[]{row.pointX, row.pointY}, row.keywords, "add", new int[]{row.fileID % fixedL});
-            }
+            System.out.printf("[Stage] F(N) buildIndex begin: N=%s, rows=%d%n", label, data.size());
+            epsrq.buildIndex(data);
+            System.out.printf("[Stage] F(N) buildIndex done: N=%s%n", label);
             fSearch[i] = runSearch(epsrq, data, fixedH, 3, div, random, totalLoops, warmUpTimes, formalTimes);
+            doneTasks++;
+            printProgress("F(N)", doneTasks, totalTasks);
         }
 
         writeResults("experiment_epsrq_2_var_h_r_n.txt", hValues, rValues, nLabels, cUpdate, dSearch, eSearch, fSearch);
+        System.out.println("[Done] Results written: experiment_epsrq_2_var_h_r_n.txt");
     }
 
     private static double runSearch(EPSRQ_Adapter epsrq,
@@ -155,7 +169,7 @@ public final class EPSRQ_Exp_Var_H_R_N {
                                      double[] fSearch) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
             writer.write(">>> EPSRQ 对齐实验 2: Var H/R/N <<<\n");
-            writer.write("Mapping: h->T, l=2^20 -> gamma=2^20(maxFiles)\n");
+            writer.write("Mapping: h->T, l=2^20 -> maxFiles, gamma=1000(fixed)\n");
             writer.write("Datasets: spatial_data_set_10W.csv, 2W~10W.csv\n\n");
 
             writer.write("Table C: Update Time (Total) vs h\n");
@@ -195,5 +209,10 @@ public final class EPSRQ_Exp_Var_H_R_N {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private static void printProgress(String stage, int current, int total) {
+        int percent = (int) ((current * 100.0) / Math.max(1, total));
+        System.out.printf("[Progress][%s] %d/%d (%d%%)%n", stage, current, total, percent);
     }
 }

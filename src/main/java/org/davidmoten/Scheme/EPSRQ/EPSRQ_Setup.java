@@ -3,6 +3,7 @@ package org.davidmoten.Scheme.EPSRQ;
 import org.apache.commons.math3.linear.LUDecomposition;
 import org.apache.commons.math3.linear.MatrixUtils;
 import org.apache.commons.math3.linear.RealMatrix;
+import org.apache.commons.math3.linear.RealVector;
 import org.apache.commons.math3.linear.SingularMatrixException;
 
 import java.security.SecureRandom;
@@ -101,7 +102,11 @@ public final class EPSRQ_Setup {
     }
 
     public static double innerProduct(CipherVector idx, CipherVector td) {
-        return dot(idx.c1, td.c1) + dot(idx.c2, td.c2);
+        RealVector i1 = MatrixUtils.createRealVector(idx.c1);
+        RealVector t1 = MatrixUtils.createRealVector(td.c1);
+        RealVector i2 = MatrixUtils.createRealVector(idx.c2);
+        RealVector t2 = MatrixUtils.createRealVector(td.c2);
+        return i1.dotProduct(t1) + i2.dotProduct(t2);
     }
 
     public static double[] chooseTrapdoorRandoms(double r1, double r2, double r3, Random rnd) {
@@ -241,10 +246,5 @@ public final class EPSRQ_Setup {
         return new LUDecomposition(m).getSolver().getInverse();
     }
 
-    private static double dot(double[] a, double[] b) {
-        double s = 0.0;
-        for (int i = 0; i < a.length; i++) s += a[i] * b[i];
-        return s;
-    }
 }
 
