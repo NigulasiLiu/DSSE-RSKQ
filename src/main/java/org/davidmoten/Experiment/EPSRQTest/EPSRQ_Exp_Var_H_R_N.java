@@ -38,7 +38,7 @@ public final class EPSRQ_Exp_Var_H_R_N {
         Random random = new Random(seed);
 
         // 修改点：更新 h 和 R 的测试梯度
-        int[] hValues = {8, 9, 10, 11, 12};
+        int[] hValues = {8, 9, 10, 11, 12, 13, 14};
         int[] rValues = {2, 4, 6, 8, 10, 12};
         String[] nLabels = {"2W", "4W", "6W", "8W", "10W"};
 
