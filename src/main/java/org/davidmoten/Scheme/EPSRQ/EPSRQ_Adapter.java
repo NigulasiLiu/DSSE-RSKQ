@@ -13,21 +13,21 @@ import java.util.Set;
 /**
  * EPSRQ_Adapter:
  * - static EPSRQ benchmark adapter
- * - fixed dictionary dimension m=8000
- * - fixed partition threshold gamma=1000
+ * - fixed dictionary dimension m=1000
+ * - fixed partition threshold gamma=100
  * - support offline buildIndex and compatibility update() buffering
  */
 public final class EPSRQ_Adapter {
 
     private static final double ZERO_EPS = 1e-6;
-    private static final int FIXED_GAMMA = 1000;
+    // 修改点 2：将 1000 修改为 100
+    private static final int FIXED_GAMMA = 100;
 
     private final int t;
     private final int maxFiles;
     private final Random rnd;
 
     private final EPSRQ_IndexBuilder builder;
-    // Prevent JIT dead-code elimination in tight loops when caller ignores results.
     private volatile long searchBlackhole = 0L;
     private volatile boolean built = false;
     private final List<FixRangeCompareToConstructionOne.DataRow> stagedRows = new ArrayList<FixRangeCompareToConstructionOne.DataRow>();
@@ -43,6 +43,7 @@ public final class EPSRQ_Adapter {
         this.t = h;
         this.maxFiles = Math.max(1, maxFiles);
         this.rnd = new Random(seed);
+        // 使用 FIXED_GAMMA = 100 覆盖外部传入的 lGamma
         this.builder = new EPSRQ_IndexBuilder(this.maxFiles, this.t, FIXED_GAMMA, seed);
         this.builder.getKeyPair();
     }
@@ -64,31 +65,23 @@ public final class EPSRQ_Adapter {
             built = false;
             int dimSpace = builder.getKeyPair().kv2Space.dim;
             long perCipherBytes = 2L * dimSpace * 8L;
-            // Compatibility mode: one buffered add corresponds to one encrypted location payload.
             lastUpdateBytes = perCipherBytes;
-        } else {
-            // static EPSRQ: ignore delete semantics, but still count time
         }
         double ms = (System.nanoTime() - start) / 1e6;
         totalUpdateTimes.add(ms);
         return ms;
     }
 
-    /**
-     * Search rectangle [xStart, xStart+rangeLen] x [yStart, yStart+rangeLen] using SGR-range decomposition.
-     */
     public List<Integer> searchRect(int xStart, int yStart, int rangeLen, String[] queryKeywords) {
         ensureBuilt();
         long clientStart = System.nanoTime();
 
         EPSRQ_Setup.SetupKeyPair kp = builder.getKeyPair();
 
-        // text trapdoor: OR query vector
         double[] qText = builder.keywordQueryVectorOr(queryKeywords);
         EPSRQ_Setup s = new EPSRQ_Setup(0);
         EPSRQ_Setup.CipherVector tdText = s.encryptTrapdoor(kp.kv1Text, qText, rnd);
 
-        // location trapdoors: SGR-range list
         int max = (1 << t);
         int xEnd = Math.min(max - 1, Math.max(0, xStart + Math.max(0, rangeLen)));
         int yEnd = Math.min(max - 1, Math.max(0, yStart + Math.max(0, rangeLen)));
@@ -99,7 +92,6 @@ public final class EPSRQ_Adapter {
             tdLocList.add(s.encryptTrapdoor(kp.kv2Space, qLoc, rnd));
         }
 
-        // trapdoor "communication size" (rough, doubles only)
         long tdBytes = 0;
         tdBytes += (long) (tdText.c1.length + tdText.c2.length) * 8L;
         for (EPSRQ_Setup.CipherVector td : tdLocList) {
@@ -113,7 +105,6 @@ public final class EPSRQ_Adapter {
         List<Integer> res = serverSearch(tdText, tdLocList, queryKeywords);
         long serverEnd = System.nanoTime();
 
-        // Consume result to keep search loop observable for JVM optimizer.
         long bh = res.size();
         for (int id : res) {
             bh = 31L * bh + id;
@@ -142,7 +133,6 @@ public final class EPSRQ_Adapter {
             }
         }
 
-        // Scan dictionary keywords and evaluate encrypted keyword-match against OR trapdoor.
         for (String w : allKeywords) {
             EPSRQ_Setup.CipherVector encKwBasis = encBasis.get(w);
             if (encKwBasis == null) {
@@ -153,7 +143,6 @@ public final class EPSRQ_Adapter {
             if (Math.abs(kwIP) <= ZERO_EPS) {
                 continue;
             }
-            // Keep semantic consistency: only query keywords can contribute final hits.
             if (!querySet.contains(w)) {
                 continue;
             }
@@ -163,7 +152,6 @@ public final class EPSRQ_Adapter {
                 continue;
             }
 
-            // Full scan includes phantom tuples; no shortcut per block.
             for (EPSRQ_IndexBuilder.EncryptedLocation e : posting) {
                 boolean locMatch = false;
                 for (EPSRQ_Setup.CipherVector tdLoc : tdLocList) {
@@ -226,4 +214,3 @@ public final class EPSRQ_Adapter {
         return sum / clientSearchTimes.size();
     }
 }
-

@@ -1,0 +1,35 @@
+>>> EPSRQ 对齐实验 2: Var H/R/N <<<
+Mapping: h->T, l=2^20 -> maxFiles, gamma=1000(fixed)
+Datasets: spatial_data_set_10W.csv, 2W~10W.csv
+
+Table C: Update Time (Total) vs h
+h          | EPSRQ(ms)   
+----------------------------
+8          | 1212254.6483
+10         | 1178003.5131
+12         | 1209517.0039
+
+Table D: Search Time (Avg) vs h
+h          | EPSRQ(ms)   
+----------------------------
+8          | 207.1884    
+10         | 204.1071    
+12         | 206.1099    
+
+Table E: Search Time (Avg) vs R(%)
+R(%)       | EPSRQ(ms)   
+----------------------------
+1          | 204.4461    
+5          | 204.6293    
+10         | 204.0777    
+15         | 206.8860    
+20         | 203.8046    
+
+Table F: Search Time (Avg) vs N
+N          | EPSRQ(ms)   
+----------------------------
+2W         | 204.4390    
+4W         | 203.5096    
+6W         | 204.9943    
+8W         | 203.8210    
+10W        | 208.2616    

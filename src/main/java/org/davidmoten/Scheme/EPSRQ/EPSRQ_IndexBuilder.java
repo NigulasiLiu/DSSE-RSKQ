@@ -15,7 +15,7 @@ import java.util.TreeSet;
 
 /**
  * EPSRQ_IndexBuilder:
- * - fixed text dimension m=8000 (global dictionary)
+ * - fixed text dimension m=1000 (Simulating Yelp scale dictionary)
  * - space dimension = 4T+1 (+3 in EASPE key => 4T+4)
  * - offline build EPKI with strict gamma padding
  */
@@ -43,7 +43,8 @@ public final class EPSRQ_IndexBuilder {
         }
     }
 
-    private static final int FIXED_TEXT_DIM = 8000;
+    // 修改点 1：将 8000 修改为 1000
+    private static final int FIXED_TEXT_DIM = 1000;
 
     private final int t;
     private final int gamma;
@@ -115,6 +116,7 @@ public final class EPSRQ_IndexBuilder {
 
         List<String> sorted = new ArrayList<>(unique);
         Collections.sort(sorted, Comparator.naturalOrder());
+        // 取前 1000 个关键字，截断字典
         int capped = Math.min(FIXED_TEXT_DIM, sorted.size());
         for (int i = 0; i < capped; i++) {
             String w = sorted.get(i);
@@ -122,7 +124,7 @@ public final class EPSRQ_IndexBuilder {
             dictionaryKeywords.add(w);
         }
 
-        // If dataset has fewer than 8000 terms, reserve the rest as synthetic placeholders.
+        // 如果实际关键字少于 1000，用伪造关键字补齐维度
         for (int i = capped; i < FIXED_TEXT_DIM; i++) {
             String placeholder = "__epsrq_pad_kw_" + i;
             dict.put(placeholder, i);
@@ -152,7 +154,7 @@ public final class EPSRQ_IndexBuilder {
                         continue;
                     }
                     if (!dict.containsKey(w)) {
-                        continue;
+                        continue; // 过滤掉被截断的低频/多余关键字
                     }
                     rawPosting.get(w).add(new int[]{fid, x, y});
                     realCount++;
@@ -218,4 +220,3 @@ public final class EPSRQ_IndexBuilder {
         return v < 0 ? v + maxFiles : v;
     }
 }
-
