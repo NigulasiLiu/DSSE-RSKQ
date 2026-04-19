@@ -30,7 +30,7 @@ public final class EPSRQ_Exp_Var_Ow {
         int div = 100;
         int searchRangePercent = 3;
         int[] owCheckpoints = {500, 1000, 1500, 2000, 2500, 3000, 3500};
-        int numTestObjects = 20;
+        int numTestObjects = 1;
         long seed = 20260105L;
         System.out.println("[Init] Start EPSRQ_Exp_Var_Ow");
         System.out.println("[Init] Loading dataset: " + filePath);

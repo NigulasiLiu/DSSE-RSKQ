@@ -15,6 +15,9 @@ import java.util.Random;
  * 与 {@link EPSRQ_Exp_Var_L_H_W} 相同的实验逻辑与输出结构，
  * 额外增加 buildIndex 耗时日志，并将检索循环改为 warmUp=100、formal=10。
  * 结果写入独立文件，避免覆盖完整版（9000/1000）实验结果。
+ *
+ * <p>{@code [Trace]} 日志（含 {@code flush}）用于观察「归一化 / 适配器构造 / 检索循环」进度；
+ * 适配器构造会触发 EASPE keyGen（文本维数约 8003），可能极慢，不参与结果数值统计。
  */
 public final class EPSRQ_Exp_Var_L_H_W_Quick {
 
@@ -32,12 +35,15 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
         int totalSearchLoops = warmUpTimes + formalTimes;
         long seed = 20260105L;
         System.out.println("[Init] Start EPSRQ_Exp_Var_L_H_W_Quick");
+        System.out.flush();
         System.out.println("[Init] Loading dataset: " + filePath);
         System.out.printf("[Init] Search loops: warmUp=%d, formal=%d%n", warmUpTimes, formalTimes);
+        System.out.flush();
 
         List<FixRangeCompareToConstructionOne.DataRow> rawData =
                 FixRangeCompareToConstructionOne.loadDataFromFile(filePath);
         System.out.println("[Init] Dataset loaded, rows=" + rawData.size());
+        System.out.flush();
         Random random = new Random(seed);
 
         int[] powers = {18, 19, 20, 21, 22, 23, 24};
@@ -57,14 +63,24 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
             for (int r = 0; r < hValues.length; r++) {
                 int h = hValues[r];
                 System.out.printf("[Stage] A(l,h) preparing data: l=2^%d, h=%d%n", power, h);
+                System.out.flush();
+                tracef("[Trace] A(l=2^%d,h=%d): normalizeData start, inRows=%d%n", power, h, rawData.size());
+                long tNorm = System.nanoTime();
                 List<FixRangeCompareToConstructionOne.DataRow> scaledData = normalizeData(rawData, h);
+                tracef("[Trace] A(l=2^%d,h=%d): normalizeData end, elapsed=%.3f s, outRows=%d%n",
+                        power, h, (System.nanoTime() - tNorm) / 1e9, scaledData.size());
                 int n = scaledData.size();
                 int edgeLength = 1 << h;
                 int rangeLen = Math.max(1, edgeLength * searchRangePercent / div);
 
+                tracef("[Trace] A(l=2^%d,h=%d): new EPSRQ_Adapter(...) start (keyGen text dim=m+3)%n", power, h);
+                long tAd = System.nanoTime();
                 EPSRQ_Adapter epsrq = new EPSRQ_Adapter(l, h, l, seed);
+                tracef("[Trace] A(l=2^%d,h=%d): new EPSRQ_Adapter end, elapsed=%.3f s%n",
+                        power, h, (System.nanoTime() - tAd) / 1e9);
 
                 System.out.printf("[Stage] A(l,h) buildIndex begin: l=2^%d, h=%d, n=%d%n", power, h, n);
+                System.out.flush();
                 long upStart = System.nanoTime();
                 epsrq.buildIndex(scaledData);
                 long upEnd = System.nanoTime();
@@ -76,8 +92,14 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
                 doneBuildTasks++;
                 printProgress("Build A(l,h)", doneBuildTasks, totalBuildTasks);
 
+                tracef("[Trace] A(l=2^%d,h=%d): search loop start, totalLoops=%d%n", power, h, totalSearchLoops);
+                int searchStep = Math.max(1, totalSearchLoops / 10);
                 long searchSum = 0L;
                 for (int i = 0; i < totalSearchLoops; i++) {
+                    if (i == 0 || i + 1 == totalSearchLoops || (i + 1) % searchStep == 0) {
+                        tracef("[Trace] A(l=2^%d,h=%d): search %d/%d (warmUp %s)%n", power, h, i + 1, totalSearchLoops,
+                                (i >= warmUpTimes) ? "done" : "pending");
+                    }
                     int xStart = random.nextInt(Math.max(1, edgeLength - rangeLen));
                     int yStart = random.nextInt(Math.max(1, edgeLength - rangeLen));
                     FixRangeCompareToConstructionOne.DataRow row = scaledData.get(random.nextInt(n));
@@ -89,6 +111,7 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
                         searchSum += duration;
                     }
                 }
+                tracef("[Trace] A(l=2^%d,h=%d): search loop end%n", power, h);
                 searchTotal[r][c] = searchSum / 1e6;
                 searchAvg[r][c] = searchTotal[r][c] / formalTimes;
             }
@@ -100,9 +123,17 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
         int[] wqCounts = {2, 4, 6, 8, 10, 12};
         double[] wqAvgMs = new double[wqCounts.length];
 
+        tracef("[Trace] B(|W_Q|): normalizeData start, fixedH=%d%n", fixedH);
+        long tNormB = System.nanoTime();
         List<FixRangeCompareToConstructionOne.DataRow> fixedData = normalizeData(rawData, fixedH);
+        tracef("[Trace] B(|W_Q|): normalizeData end, elapsed=%.3f s, rows=%d%n",
+                (System.nanoTime() - tNormB) / 1e9, fixedData.size());
+        tracef("[Trace] B(|W_Q|): new EPSRQ_Adapter(...) start%n");
+        long tAdB = System.nanoTime();
         EPSRQ_Adapter fixedEpsrq = new EPSRQ_Adapter(fixedL, fixedH, fixedL, seed);
+        tracef("[Trace] B(|W_Q|): new EPSRQ_Adapter end, elapsed=%.3f s%n", (System.nanoTime() - tAdB) / 1e9);
         System.out.printf("[Stage] B(|W_Q|) buildIndex begin: h=%d, n=%d%n", fixedH, fixedData.size());
+        System.out.flush();
         long bStart = System.nanoTime();
         fixedEpsrq.buildIndex(fixedData);
         long bEnd = System.nanoTime();
@@ -114,10 +145,15 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
         int fixedRangeLen = Math.max(1, fixedEdge * searchRangePercent / div);
         int dataSize = fixedData.size();
 
+        int bSearchStep = Math.max(1, totalSearchLoops / 10);
         for (int i = 0; i < wqCounts.length; i++) {
             int wq = wqCounts[i];
+            tracef("[Trace] B(|W_Q|=%d): search loop start, totalLoops=%d%n", wq, totalSearchLoops);
             long searchSum = 0L;
             for (int loop = 0; loop < totalSearchLoops; loop++) {
+                if (loop == 0 || loop + 1 == totalSearchLoops || (loop + 1) % bSearchStep == 0) {
+                    tracef("[Trace] B(|W_Q|=%d): search %d/%d%n", wq, loop + 1, totalSearchLoops);
+                }
                 int xStart = random.nextInt(Math.max(1, fixedEdge - fixedRangeLen));
                 int yStart = random.nextInt(Math.max(1, fixedEdge - fixedRangeLen));
                 FixRangeCompareToConstructionOne.DataRow row = fixedData.get(random.nextInt(dataSize));
@@ -137,6 +173,11 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
         writeResults(RESULT_FILE, powers, hValues, wqCounts,
                 updateTotal, updateAvg, searchTotal, searchAvg, wqAvgMs, formalTimes);
         System.out.println("[Done] Results written: " + RESULT_FILE);
+    }
+
+    private static void tracef(String fmt, Object... args) {
+        System.out.printf(fmt, args);
+        System.out.flush();
     }
 
     private static List<FixRangeCompareToConstructionOne.DataRow> normalizeData(
@@ -230,5 +271,6 @@ public final class EPSRQ_Exp_Var_L_H_W_Quick {
     private static void printProgress(String stage, int current, int total) {
         int percent = (int) ((current * 100.0) / Math.max(1, total));
         System.out.printf("[Progress][%s] %d/%d (%d%%)%n", stage, current, total, percent);
+        System.out.flush();
     }
 }

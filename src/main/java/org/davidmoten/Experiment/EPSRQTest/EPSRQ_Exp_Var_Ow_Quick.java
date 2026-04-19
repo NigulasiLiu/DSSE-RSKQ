@@ -15,6 +15,9 @@ import java.util.Random;
  * 增加每次 buildIndex 的耗时日志；检索在每个 checkpoint 上采用 warmUp=100、formal=10，
  * 输出文件中 Search(ms) 为 formal 阶段单次查询平均耗时。
  * 结果写入独立文件。
+ *
+ * <p>{@code [Trace]} 用于观察 materialize / {@code new EPSRQ_Adapter} / 检索循环进度（含 flush）；
+ * 适配器构造中的 EASPE keyGen（文本维约 8003）可能极慢。
  */
 public final class EPSRQ_Exp_Var_Ow_Quick {
 
@@ -36,15 +39,23 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
         int numTestObjects = 20;
         long seed = 20260105L;
         System.out.println("[Init] Start EPSRQ_Exp_Var_Ow_Quick");
+        System.out.flush();
         System.out.println("[Init] Loading dataset: " + filePath);
         System.out.printf("[Init] Search loops per checkpoint: warmUp=%d, formal=%d%n", warmUpTimes, formalTimes);
+        System.out.flush();
         Random random = new Random(seed);
 
         List<FixRangeCompareToConstructionOne.DataRow> raw =
                 FixRangeCompareToConstructionOne.loadDataFromFile(filePath);
         System.out.println("[Init] Raw dataset loaded, rows=" + raw.size());
+        System.out.flush();
+        tracef("[Trace] Init: normalizeData start, h=%d%n", fixedH);
+        long tNorm0 = System.nanoTime();
         List<FixRangeCompareToConstructionOne.DataRow> data = normalizeData(raw, fixedH);
+        tracef("[Trace] Init: normalizeData end, elapsed=%.3f s, rows=%d%n",
+                (System.nanoTime() - tNorm0) / 1e9, data.size());
         System.out.println("[Init] Normalized dataset ready, rows=" + data.size() + ", h=" + fixedH);
+        System.out.flush();
 
         double[] totalSearchNs = new double[owCheckpoints.length];
         double[] totalBuildMs = new double[owCheckpoints.length];
@@ -59,10 +70,18 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
             System.out.printf("[Stage] Ow object %d/%d selected%n", tObj + 1, numTestObjects);
             for (int cpIdx = 0; cpIdx < owCheckpoints.length; cpIdx++) {
                 int ow = owCheckpoints[cpIdx];
+                tracef("[Trace] Ow: materializeDataWithHistory start, checkpoint=%d%n", ow);
+                long tMat = System.nanoTime();
                 List<FixRangeCompareToConstructionOne.DataRow> owData = materializeDataWithHistory(data, target, ow);
+                tracef("[Trace] Ow: materialize end, elapsed=%.3f s, rows=%d%n",
+                        (System.nanoTime() - tMat) / 1e9, owData.size());
+                tracef("[Trace] Ow: new EPSRQ_Adapter(...) start (object=%d, cp=%d)%n", tObj + 1, ow);
+                long tAd = System.nanoTime();
                 EPSRQ_Adapter epsrq = new EPSRQ_Adapter(fixedL, fixedH, fixedL, seed + cpIdx * 131L + tObj);
+                tracef("[Trace] Ow: new EPSRQ_Adapter end, elapsed=%.3f s%n", (System.nanoTime() - tAd) / 1e9);
                 System.out.printf("[Stage] Ow buildIndex begin: object=%d/%d, checkpoint=%d, rows=%d%n",
                         tObj + 1, numTestObjects, ow, owData.size());
+                System.out.flush();
                 long b0 = System.nanoTime();
                 epsrq.buildIndex(owData);
                 long b1 = System.nanoTime();
@@ -73,8 +92,14 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
                 System.out.printf("[Timing] Ow buildIndex: %.4f ms (object=%d/%d, checkpoint=%d, rows=%d)%n",
                         buildMs, tObj + 1, numTestObjects, ow, owData.size());
 
+                tracef("[Trace] Ow: search loop start, totalLoops=%d (object=%d, cp=%d)%n",
+                        totalSearchLoops, tObj + 1, ow);
+                int siStep = Math.max(1, totalSearchLoops / 10);
                 long searchSumNs = 0L;
                 for (int si = 0; si < totalSearchLoops; si++) {
+                    if (si == 0 || si + 1 == totalSearchLoops || (si + 1) % siStep == 0) {
+                        tracef("[Trace] Ow: search %d/%d (object=%d, cp=%d)%n", si + 1, totalSearchLoops, tObj + 1, ow);
+                    }
                     int xStart = random.nextInt(Math.max(1, edge - rangeLen));
                     int yStart = random.nextInt(Math.max(1, edge - rangeLen));
                     long s0 = System.nanoTime();
@@ -84,6 +109,7 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
                         searchSumNs += (s1 - s0);
                     }
                 }
+                tracef("[Trace] Ow: search loop end (object=%d, cp=%d)%n", tObj + 1, ow);
                 totalSearchNs[cpIdx] += searchSumNs;
                 doneTasks++;
                 if (doneTasks % Math.max(1, owCheckpoints.length) == 0 || doneTasks == totalTasks) {
@@ -101,6 +127,11 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
 
         writeResults(RESULT_FILE, owCheckpoints, avgSearchMs, avgBuildMs, warmUpTimes, formalTimes);
         System.out.println("[Done] Results written: " + RESULT_FILE);
+    }
+
+    private static void tracef(String fmt, Object... args) {
+        System.out.printf(fmt, args);
+        System.out.flush();
     }
 
     private static List<FixRangeCompareToConstructionOne.DataRow> normalizeData(
@@ -176,5 +207,6 @@ public final class EPSRQ_Exp_Var_Ow_Quick {
     private static void printProgress(String stage, int current, int total) {
         int percent = (int) ((current * 100.0) / Math.max(1, total));
         System.out.printf("[Progress][%s] %d/%d (%d%%)%n", stage, current, total, percent);
+        System.out.flush();
     }
 }
