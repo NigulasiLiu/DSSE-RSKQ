@@ -18,7 +18,7 @@ import java.util.Random;
  *
  * 参数语义映射:
  * - h -> T
- * - l(固定 2^20) -> maxFiles, gamma 固定为 1000
+ * - l(固定 2^20) -> maxFiles, gamma 固定为 100
  */
 public final class EPSRQ_Exp_Var_H_R_N {
 
@@ -37,8 +37,9 @@ public final class EPSRQ_Exp_Var_H_R_N {
         System.out.println("[Init] Loading dataset: " + basePath + "10W.csv");
         Random random = new Random(seed);
 
-        int[] hValues = {8, 10, 12};
-        int[] rValues = {1, 5, 10, 15, 20};
+        // 修改点：更新 h 和 R 的测试梯度
+        int[] hValues = {8, 9, 10, 11, 12};
+        int[] rValues = {2, 4, 6, 8, 10, 12};
         String[] nLabels = {"2W", "4W", "6W", "8W", "10W"};
 
         double[] cUpdate = new double[hValues.length];
@@ -56,6 +57,7 @@ public final class EPSRQ_Exp_Var_H_R_N {
             int h = hValues[i];
             System.out.printf("[Stage] C&D(h) preparing data: h=%d%n", h);
             List<FixRangeCompareToConstructionOne.DataRow> data = normalizeData(raw10W, h);
+            // 注意：底层的 Adapter 已经强行将 gamma 锁定为 100，所以这里的 fixedL 仅作最大文件数上限
             EPSRQ_Adapter epsrq = new EPSRQ_Adapter(fixedL, h, fixedL, seed);
 
             System.out.printf("[Stage] C&D(h) buildIndex begin: h=%d, n=%d%n", h, data.size());
@@ -169,7 +171,7 @@ public final class EPSRQ_Exp_Var_H_R_N {
                                      double[] fSearch) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName))) {
             writer.write(">>> EPSRQ 对齐实验 2: Var H/R/N <<<\n");
-            writer.write("Mapping: h->T, l=2^20 -> maxFiles, gamma=1000(fixed)\n");
+            writer.write("Mapping: h->T, l=2^20 -> maxFiles, gamma=100(fixed)\n");
             writer.write("Datasets: spatial_data_set_10W.csv, 2W~10W.csv\n\n");
 
             writer.write("Table C: Update Time (Total) vs h\n");
