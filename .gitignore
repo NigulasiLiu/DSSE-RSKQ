@@ -1,6 +1,7 @@
 target/
 src/dataset/
 src/results/
+result
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
