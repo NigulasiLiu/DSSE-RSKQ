@@ -1,7 +1,5 @@
 package org.davidmoten.Scheme.EPSRQ;
 
-import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
-
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -92,7 +90,7 @@ public final class EPSRQPlus_IndexBuilder {
         return dict;
     }
     
-    public BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    public BuildStats buildIndex(List<DataRow> allData) {
         dict.clear();
         dictionaryKeywords.clear();
         encKeywordBasis.clear();
@@ -114,10 +112,10 @@ public final class EPSRQPlus_IndexBuilder {
                             treeDepth, nodeCount);
     }
     
-    private void buildDynamicDictionary(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    private void buildDynamicDictionary(List<DataRow> allData) {
         Set<String> uniqueKeywords = new TreeSet<>();
         if (allData != null) {
-            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+            for (DataRow row : allData) {
                 if (row != null && row.keywords != null) {
                     for (String keyword : row.keywords) {
                         if (keyword != null && !keyword.isEmpty()) {
@@ -144,13 +142,13 @@ public final class EPSRQPlus_IndexBuilder {
         }
     }
     
-    private int buildBKFtreeIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    private int buildBKFtreeIndex(List<DataRow> allData) {
         int nodeCount = 1; // 根节点
         
         if (allData != null) {
             // 按关键词分组数据
             Map<String, List<int[]>> keywordPostings = new HashMap<>();
-            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+            for (DataRow row : allData) {
                 if (row != null && row.keywords != null) {
                     int fileId = normalizeFileId(row.fileID);
                     int x = (int) row.pointX;

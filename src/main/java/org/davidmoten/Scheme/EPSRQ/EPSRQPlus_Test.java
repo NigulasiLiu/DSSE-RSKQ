@@ -1,6 +1,6 @@
 package org.davidmoten.Scheme.EPSRQ;
 
-import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+import org.davidmoten.Scheme.EPSRQ.DataRow;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +25,7 @@ public final class EPSRQPlus_Test {
         System.out.println("✅ EPSRQPlus_Adapter 创建成功");
         
         // 2. 生成模拟测试数据
-        List<FixRangeCompareToConstructionOne.DataRow> testData = generateTestData();
+        List<DataRow> testData = generateTestData();
         System.out.println("✅ 测试数据生成完成，共 " + testData.size() + " 条记录");
         
         // 3. 构建索引
@@ -81,8 +81,8 @@ public final class EPSRQPlus_Test {
     /**
      * 生成模拟测试数据
      */
-    private static List<FixRangeCompareToConstructionOne.DataRow> generateTestData() {
-        List<FixRangeCompareToConstructionOne.DataRow> data = new ArrayList<>();
+    private static List<DataRow> generateTestData() {
+        List<DataRow> data = new ArrayList<>();
         
         // 生成100条测试数据
         for (int i = 0; i < 100; i++) {
@@ -100,7 +100,7 @@ public final class EPSRQPlus_Test {
                 keywords = new String[]{"shopping", "mall", "retail"};
             }
             
-            data.add(new FixRangeCompareToConstructionOne.DataRow(fileId, pointX, pointY, keywords));
+            data.add(new DataRow(fileId, pointX, pointY, keywords));
         }
         
         return data;

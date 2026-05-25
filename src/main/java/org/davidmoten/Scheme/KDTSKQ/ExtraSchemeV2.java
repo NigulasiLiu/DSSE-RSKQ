@@ -6,9 +6,6 @@ import java.math.BigInteger;
 import java.util.*;
 import java.util.stream.Collectors;
 
-// --- 基础数据结构 ---
-
-// 空间 K-D 树节点 (2D)
 class SpatialKDNode {
     int minX, maxX, minY, maxY;
     SpatialKDNode left, right;
@@ -16,28 +13,16 @@ class SpatialKDNode {
     VHRSSE hilbertIndex;
 }
 
-// 时间 K-D 树节点 (1D)
-class TimeKDNode {
-    int minT, maxT;
-    TimeKDNode left, right;
-    boolean isLeaf;
-    VHRSSE timeIndex;
-}
-
 public class ExtraSchemeV2 {
     private int L;
     private HilbertCurve hilbertCurve;
 
-    // 客户端维护的本地树结构
     private SpatialKDNode spatialRoot;
-    private TimeKDNode timeRoot;
 
-    // 关键字精确匹配索引
-    private Map<String, List<Integer>> keywordInvertedIndex;
+    private VHRSSE globalTimeIndex;
     private VHRSSE keywordVHRSSE;
+    private Map<String, List<Integer>> keywordInvertedIndex;
 
-    // --- 核心优化：共享的全局云端状态 ---
-    // 所有的加密位图最终合并到这里，交由 Server 托管。Server 完全不知道数据的维度含义。
     public Map<String, byte[]> GLOBAL_SERVER_EDB;
 
     public ExtraSchemeV2(int L, int hilbertBits) {
@@ -47,73 +32,31 @@ public class ExtraSchemeV2 {
         this.GLOBAL_SERVER_EDB = new HashMap<>();
     }
 
-    // ========================================================
-    // 1. 构建阶段 (Build Phase)
-    // ========================================================
     public void build(List<Record> dataset) {
-        // 1.1 构建 2D 空间 KD 树
         int[] sBounds = getSpatialBounds(dataset);
         spatialRoot = buildSpatialKDTree(dataset, sBounds[0], sBounds[1], sBounds[2], sBounds[3], 0);
 
-        // 1.2 构建 1D 时间 KD 树
-        int[] tBounds = getTimeBounds(dataset);
-        timeRoot = buildTimeKDTree(dataset, tBounds[0], tBounds[1]);
+        Map<String, List<Integer>> tMap = new HashMap<>();
+        for (Record r : dataset) {
+            String tKey = "T_" + r.timestamp;
+            tMap.computeIfAbsent(tKey, k -> new ArrayList<>()).add(r.id);
+        }
+        globalTimeIndex = VHRSSE.Setup(L);
+        List<String> sortedTKeys = tMap.keySet().stream().sorted().collect(Collectors.toList());
+        globalTimeIndex.buildIndex(tMap, sortedTKeys);
+        GLOBAL_SERVER_EDB.putAll(globalTimeIndex.EDB);
 
-        // 1.3 构建 离散关键字 倒排索引
         for (Record r : dataset) {
             for (String kw : r.W) {
-                // 加上前缀防止与其他维度的哈希碰撞
                 keywordInvertedIndex.computeIfAbsent("KW_" + kw, k -> new ArrayList<>()).add(r.id);
             }
         }
         keywordVHRSSE = VHRSSE.Setup(L);
         List<String> sortedKeywords = keywordInvertedIndex.keySet().stream().sorted().collect(Collectors.toList());
         keywordVHRSSE.buildIndex(keywordInvertedIndex, sortedKeywords);
-
-        // 1.4 【合并 EDB】(模拟上传至服务器)
         GLOBAL_SERVER_EDB.putAll(keywordVHRSSE.EDB);
     }
 
-    // --- 1D 时间 K-D 树构建 ---
-    private TimeKDNode buildTimeKDTree(List<Record> docs, int minT, int maxT) {
-        TimeKDNode node = new TimeKDNode();
-        node.minT = minT;
-        node.maxT = maxT;
-
-        if (docs.size() <= L) {
-            node.isLeaf = true;
-            node.timeIndex = VHRSSE.Setup(L);
-
-            // 构建该分区内的时间索引
-            Map<String, List<Integer>> tMap = new HashMap<>();
-            for (Record r : docs) {
-                // 加前缀隔离域
-                String tKey = "T_" + r.timestamp;
-                tMap.computeIfAbsent(tKey, k -> new ArrayList<>()).add(r.id);
-            }
-            List<String> sortedTKeys = tMap.keySet().stream().sorted().collect(Collectors.toList());
-            node.timeIndex.buildIndex(tMap, sortedTKeys);
-
-            // 将局部 EDB 并入全局 EDB
-            GLOBAL_SERVER_EDB.putAll(node.timeIndex.EDB);
-            return node;
-        }
-
-        node.isLeaf = false;
-        // 对时间戳排序取中位数切分，保证绝对平衡
-        docs.sort(Comparator.comparingInt(r -> r.timestamp));
-        int midIndex = docs.size() / 2;
-        int midT = docs.get(midIndex).timestamp;
-
-        List<Record> leftDocs = new ArrayList<>(docs.subList(0, midIndex));
-        List<Record> rightDocs = new ArrayList<>(docs.subList(midIndex, docs.size()));
-
-        node.left = buildTimeKDTree(leftDocs, minT, midT);
-        node.right = buildTimeKDTree(rightDocs, midT + 1, maxT);
-        return node;
-    }
-
-    // --- 2D 空间 K-D 树构建 (带 Median 切分优化) ---
     private SpatialKDNode buildSpatialKDTree(List<Record> docs, int minX, int maxX, int minY, int maxY, int depth) {
         SpatialKDNode node = new SpatialKDNode();
         node.minX = minX; node.maxX = maxX;
@@ -129,14 +72,13 @@ public class ExtraSchemeV2 {
                 hMap.computeIfAbsent(hKey, k -> new ArrayList<>()).add(r.id);
             }
             List<String> sortedHKeys = hMap.keySet().stream()
-                    // 必须先剥离前缀转 BigInteger 排序，再拼回前缀
                     .map(s -> new BigInteger(s.substring(2)))
                     .sorted()
                     .map(b -> "H_" + b.toString())
                     .collect(Collectors.toList());
 
             node.hilbertIndex.buildIndex(hMap, sortedHKeys);
-            GLOBAL_SERVER_EDB.putAll(node.hilbertIndex.EDB); // 合并至全局
+            GLOBAL_SERVER_EDB.putAll(node.hilbertIndex.EDB);
             return node;
         }
 
@@ -144,7 +86,7 @@ public class ExtraSchemeV2 {
         List<Record> leftDocs = new ArrayList<>();
         List<Record> rightDocs = new ArrayList<>();
 
-        if (depth % 2 == 0) { // 按 X 轴中位数切分
+        if (depth % 2 == 0) {
             docs.sort(Comparator.comparingInt(r -> r.x));
             int midX = docs.get(docs.size() / 2).x;
             for (Record r : docs) {
@@ -152,7 +94,7 @@ public class ExtraSchemeV2 {
             }
             node.left = buildSpatialKDTree(leftDocs, minX, midX, minY, maxY, depth + 1);
             node.right = buildSpatialKDTree(rightDocs, midX + 1, maxX, minY, maxY, depth + 1);
-        } else { // 按 Y 轴中位数切分
+        } else {
             docs.sort(Comparator.comparingInt(r -> r.y));
             int midY = docs.get(docs.size() / 2).y;
             for (Record r : docs) {
@@ -164,23 +106,14 @@ public class ExtraSchemeV2 {
         return node;
     }
 
-    // ========================================================
-    // 2. 查询与交集阶段 (Search Phase)
-    // ========================================================
     public Set<Integer> search(int qMinX, int qMaxX, int qMinY, int qMaxY, int qMinT, int qMaxT, List<String> W_Q) throws Exception {
-
-        // 1. 独立搜索空间 K-D 树
         Set<Integer> spatialDocs = new HashSet<>();
         searchSpatial(spatialRoot, qMinX, qMaxX, qMinY, qMaxY, spatialDocs);
 
-        // 2. 独立搜索时间 K-D 树
-        Set<Integer> timeDocs = new HashSet<>();
-        searchTime(timeRoot, qMinT, qMaxT, timeDocs);
+        Set<Integer> timeDocs = searchTime(qMinT, qMaxT);
 
-        // 3. 独立搜索离散关键字
         Set<Integer> wordDocs = searchKeywords(W_Q);
 
-        // 4. 客户端本地取交集 (Intersection)
         Set<Integer> finalResult = new HashSet<>(spatialDocs);
         finalResult.retainAll(timeDocs);
         if (wordDocs != null) {
@@ -190,33 +123,16 @@ public class ExtraSchemeV2 {
         return finalResult;
     }
 
-    // --- 搜寻时间树 ---
-    private void searchTime(TimeKDNode node, int qMinT, int qMaxT, Set<Integer> result) throws Exception {
-        if (qMaxT < node.minT || qMinT > node.maxT) return; // 剪枝
-
-        if (node.isLeaf) {
-            // 裁剪有效时间查询域
-            int tStart = Math.max(qMinT, node.minT);
-            int tEnd = Math.min(qMaxT, node.maxT);
-
-            String[] range = new String[]{"T_" + tStart, "T_" + tEnd};
-            List<String> tokens = node.timeIndex.genToken(range);
-
-            if (!tokens.isEmpty()) {
-                // 注意：这里去模拟查询 GLOBAL_SERVER_EDB
-                List<byte[]> encRes = fetchFromServer(tokens);
-                List<Integer> docs = node.timeIndex.localSearch(encRes, tokens);
-                result.addAll(docs);
-            }
-        } else {
-            searchTime(node.left, qMinT, qMaxT, result);
-            searchTime(node.right, qMinT, qMaxT, result);
-        }
+    private Set<Integer> searchTime(int qMinT, int qMaxT) throws Exception {
+        String[] range = new String[]{"T_" + qMinT, "T_" + qMaxT};
+        List<String> tokens = globalTimeIndex.genToken(range);
+        if (tokens.isEmpty()) return new HashSet<>();
+        List<byte[]> encRes = fetchFromServer(tokens);
+        return new HashSet<>(globalTimeIndex.localSearch(encRes, tokens));
     }
 
-    // --- 搜寻空间树 ---
     private void searchSpatial(SpatialKDNode node, int qMinX, int qMaxX, int qMinY, int qMaxY, Set<Integer> result) throws Exception {
-        if (qMaxX < node.minX || qMinX > node.maxX || qMaxY < node.minY || qMinY > node.maxY) return; // 剪枝
+        if (qMaxX < node.minX || qMinX > node.maxX || qMaxY < node.minY || qMinY > node.maxY) return;
 
         if (node.isLeaf) {
             int ixMin = Math.max(qMinX, node.minX);
@@ -224,7 +140,6 @@ public class ExtraSchemeV2 {
             int iyMin = Math.max(qMinY, node.minY);
             int iyMax = Math.min(qMaxY, node.maxY);
 
-            // 此处省略 Hilbert 区间提取的逻辑实现细节
             List<BigInteger[]> intervals = extractHilbertIntervals(ixMin, ixMax, iyMin, iyMax);
 
             for (BigInteger[] interval : intervals) {
@@ -232,7 +147,7 @@ public class ExtraSchemeV2 {
                 List<String> tokens = node.hilbertIndex.genToken(range);
 
                 if (!tokens.isEmpty()) {
-                    List<byte[]> encRes = fetchFromServer(tokens); // 查询全局字典
+                    List<byte[]> encRes = fetchFromServer(tokens);
                     List<Integer> docs = node.hilbertIndex.localSearch(encRes, tokens);
                     result.addAll(docs);
                 }
@@ -243,13 +158,12 @@ public class ExtraSchemeV2 {
         }
     }
 
-    // --- 搜寻关键字 ---
     private Set<Integer> searchKeywords(List<String> W_Q) throws Exception {
         if (W_Q == null || W_Q.isEmpty()) return null;
 
         Set<Integer> result = null;
         for (String kw : W_Q) {
-            String[] range = new String[]{"KW_" + kw, "KW_" + kw}; // 精确匹配转化
+            String[] range = new String[]{"KW_" + kw, "KW_" + kw};
             List<String> tokens = keywordVHRSSE.genToken(range);
 
             Set<Integer> kwDocs = new HashSet<>();
@@ -259,12 +173,11 @@ public class ExtraSchemeV2 {
             }
 
             if (result == null) result = kwDocs;
-            else result.retainAll(kwDocs); // AND 语义
+            else result.retainAll(kwDocs);
         }
         return result;
     }
 
-    // 模拟服务端响应：从全局盲化字典中提取密文
     private List<byte[]> fetchFromServer(List<String> tokens) {
         List<byte[]> result = new ArrayList<>();
         for (String token : tokens) {
@@ -275,9 +188,43 @@ public class ExtraSchemeV2 {
         return result;
     }
 
-    // 省略获取边界的辅助函数 getSpatialBounds / getTimeBounds / extractHilbertIntervals
-    public int[] getSpatialBounds(List<Record> dataset){
-        //TODO
-        return new int[0];
+    private List<BigInteger[]> extractHilbertIntervals(int minX, int maxX, int minY, int maxY) {
+        List<BigInteger> hValues = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                hValues.add(hilbertCurve.index(x, y));
+            }
+        }
+        Collections.sort(hValues);
+
+        List<BigInteger[]> intervals = new ArrayList<>();
+        if (hValues.isEmpty()) return intervals;
+
+        BigInteger start = hValues.get(0);
+        BigInteger prev = start;
+
+        for (int i = 1; i < hValues.size(); i++) {
+            BigInteger curr = hValues.get(i);
+            if (!curr.subtract(prev).equals(BigInteger.ONE)) {
+                intervals.add(new BigInteger[]{start, prev});
+                start = curr;
+            }
+            prev = curr;
+        }
+        intervals.add(new BigInteger[]{start, prev});
+        return intervals;
+    }
+
+    public int[] getSpatialBounds(List<Record> dataset) {
+        if (dataset == null || dataset.isEmpty()) return new int[]{0, 0, 0, 0};
+        int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (Record r : dataset) {
+            if (r.x < minX) minX = r.x;
+            if (r.x > maxX) maxX = r.x;
+            if (r.y < minY) minY = r.y;
+            if (r.y > maxY) maxY = r.y;
+        }
+        return new int[]{minX, maxX, minY, maxY};
     }
 }

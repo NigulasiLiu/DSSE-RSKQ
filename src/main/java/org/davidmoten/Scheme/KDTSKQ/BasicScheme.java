@@ -1,88 +1,117 @@
 package org.davidmoten.Scheme.KDTSKQ;
 
+import org.davidmoten.Hilbert.HilbertComponent.HilbertCurve;
+
+import java.math.BigInteger;
 import java.util.*;
 import java.util.stream.Collectors;
 
-class Record {
-    int id;
-    int x, y;
-    int timestamp; // 0 to 86400
-    List<String> W;
-}
-
 public class BasicScheme {
-    private VHRSSE xIndex, yIndex, tIndex;
-    private Map<String, List<Integer>> wIndex; // 关键字索引 (实际中也应加密)
+    private VHRSSE hilbertIndex;
+    private VHRSSE timeIndex;
+    private VHRSSE keywordIndex;
+    private HilbertCurve hilbertCurve;
     private int L;
 
-    public BasicScheme(int L) {
+    public BasicScheme(int L, int hilbertBits) {
         this.L = L;
-        this.xIndex = VHRSSE.Setup(L);
-        this.yIndex = VHRSSE.Setup(L);
-        this.tIndex = VHRSSE.Setup(L);
-        this.wIndex = new HashMap<>();
+        this.hilbertIndex = VHRSSE.Setup(L);
+        this.timeIndex = VHRSSE.Setup(L);
+        this.keywordIndex = VHRSSE.Setup(L);
+        this.hilbertCurve = HilbertCurve.bits(hilbertBits).dimensions(2);
     }
 
-    // 提取并构建 VHRSSE 所需的倒排表和有序关键字列表
+    public void build(List<Record> dataset) {
+        Map<String, List<Integer>> hMap = new HashMap<>();
+        Map<String, List<Integer>> tMap = new HashMap<>();
+        Map<String, List<Integer>> kwMap = new HashMap<>();
+
+        for (Record r : dataset) {
+            String hKey = hilbertCurve.index(r.x, r.y).toString();
+            hMap.computeIfAbsent(hKey, k -> new ArrayList<>()).add(r.id);
+
+            String tKey = String.valueOf(r.timestamp);
+            tMap.computeIfAbsent(tKey, k -> new ArrayList<>()).add(r.id);
+
+            for (String kw : r.W) {
+                kwMap.computeIfAbsent(kw, k -> new ArrayList<>()).add(r.id);
+            }
+        }
+
+        build1DIndex(hilbertIndex, hMap);
+        build1DIndex(timeIndex, tMap);
+        build1DIndex(keywordIndex, kwMap);
+    }
+
     private void build1DIndex(VHRSSE index, Map<String, List<Integer>> invertedMap) {
         List<String> sortedKeys = invertedMap.keySet().stream()
-                .map(Long::parseLong)
+                .map(BigInteger::new)
                 .sorted()
-                .map(String::valueOf)
+                .map(BigInteger::toString)
                 .collect(Collectors.toList());
         index.buildIndex(invertedMap, sortedKeys);
     }
 
-    public void build(List<Record> dataset) {
-        Map<String, List<Integer>> xMap = new HashMap<>();
-        Map<String, List<Integer>> yMap = new HashMap<>();
-        Map<String, List<Integer>> tMap = new HashMap<>();
-
-        for (Record r : dataset) {
-            xMap.computeIfAbsent(String.valueOf(r.x), k -> new ArrayList<>()).add(r.id);
-            yMap.computeIfAbsent(String.valueOf(r.y), k -> new ArrayList<>()).add(r.id);
-            tMap.computeIfAbsent(String.valueOf(r.timestamp), k -> new ArrayList<>()).add(r.id);
-
-            for (String kw : r.W) {
-                wIndex.computeIfAbsent(kw, k -> new ArrayList<>()).add(r.id);
+    public Set<Integer> search(int minX, int maxX, int minY, int maxY, int t1, int t2, List<String> W_Q) throws Exception {
+        List<BigInteger[]> hilbertIntervals = extractHilbertIntervals(minX, maxX, minY, maxY);
+        Set<Integer> spatialDocs = new HashSet<>();
+        for (BigInteger[] interval : hilbertIntervals) {
+            String[] range = new String[]{interval[0].toString(), interval[1].toString()};
+            List<String> tokens = hilbertIndex.genToken(range);
+            if (!tokens.isEmpty()) {
+                List<byte[]> encRes = hilbertIndex.searchTokens(tokens);
+                spatialDocs.addAll(hilbertIndex.localSearch(encRes, tokens));
             }
         }
 
-        build1DIndex(xIndex, xMap);
-        build1DIndex(yIndex, yMap);
-        build1DIndex(tIndex, tMap);
-    }
+        List<String> tTokens = timeIndex.genToken(new String[]{String.valueOf(t1), String.valueOf(t2)});
+        List<byte[]> tRes = timeIndex.searchTokens(tTokens);
+        Set<Integer> timeDocs = new HashSet<>(timeIndex.localSearch(tRes, tTokens));
 
-    public Set<Integer> search(int minX, int maxX, int minY, int maxY, int t1, int t2, List<String> W_Q) throws Exception {
-        // 1. 坐标 X 查询
-        List<String> xTokens = xIndex.genToken(new String[]{String.valueOf(minX), String.valueOf(maxX)});
-        List<byte[]> xRes = xIndex.searchTokens(xTokens);
-        Set<Integer> xDocs = new HashSet<>(xIndex.localSearch(xRes, xTokens));
-
-        // 2. 坐标 Y 查询
-        List<String> yTokens = yIndex.genToken(new String[]{String.valueOf(minY), String.valueOf(maxY)});
-        List<byte[]> yRes = yIndex.searchTokens(yTokens);
-        Set<Integer> yDocs = new HashSet<>(yIndex.localSearch(yRes, yTokens));
-
-        // 3. Timestamp 查询
-        List<String> tTokens = tIndex.genToken(new String[]{String.valueOf(t1), String.valueOf(t2)});
-        List<byte[]> tRes = tIndex.searchTokens(tTokens);
-        Set<Integer> tDocs = new HashSet<>(tIndex.localSearch(tRes, tTokens));
-
-        // 4. 关键字 W 查询 (需全部满足 W_Q)
-        Set<Integer> wDocs = null;
+        Set<Integer> wordDocs = null;
         for (String kw : W_Q) {
-            Set<Integer> kwRes = new HashSet<>(wIndex.getOrDefault(kw, new ArrayList<>()));
-            if (wDocs == null) wDocs = kwRes;
-            else wDocs.retainAll(kwRes);
+            String[] range = new String[]{kw, kw};
+            List<String> tokens = keywordIndex.genToken(range);
+            Set<Integer> kwDocs = new HashSet<>();
+            if (!tokens.isEmpty()) {
+                List<byte[]> encRes = keywordIndex.searchTokens(tokens);
+                kwDocs.addAll(keywordIndex.localSearch(encRes, tokens));
+            }
+            if (wordDocs == null) wordDocs = kwDocs;
+            else wordDocs.retainAll(kwDocs);
         }
 
-        // 5. 客户端本地取交集
-        Set<Integer> finalResult = new HashSet<>(xDocs);
-        finalResult.retainAll(yDocs);
-        finalResult.retainAll(tDocs);
-        if (wDocs != null) finalResult.retainAll(wDocs);
+        Set<Integer> finalResult = new HashSet<>(spatialDocs);
+        finalResult.retainAll(timeDocs);
+        if (wordDocs != null) finalResult.retainAll(wordDocs);
 
         return finalResult;
+    }
+
+    private List<BigInteger[]> extractHilbertIntervals(int minX, int maxX, int minY, int maxY) {
+        List<BigInteger> hValues = new ArrayList<>();
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                hValues.add(hilbertCurve.index(x, y));
+            }
+        }
+        Collections.sort(hValues);
+
+        List<BigInteger[]> intervals = new ArrayList<>();
+        if (hValues.isEmpty()) return intervals;
+
+        BigInteger start = hValues.get(0);
+        BigInteger prev = start;
+
+        for (int i = 1; i < hValues.size(); i++) {
+            BigInteger curr = hValues.get(i);
+            if (!curr.subtract(prev).equals(BigInteger.ONE)) {
+                intervals.add(new BigInteger[]{start, prev});
+                start = curr;
+            }
+            prev = curr;
+        }
+        intervals.add(new BigInteger[]{start, prev});
+        return intervals;
     }
 }

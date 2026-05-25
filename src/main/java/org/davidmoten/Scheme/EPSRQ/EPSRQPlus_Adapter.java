@@ -1,6 +1,6 @@
 package org.davidmoten.Scheme.EPSRQ;
 
-import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+import org.davidmoten.Scheme.EPSRQ.DataRow;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,7 +26,7 @@ public final class EPSRQPlus_Adapter {
     private final EPSRQPlus_IndexBuilder builder;
     private volatile long searchBlackhole = 0L;
     private volatile boolean built = false;
-    private final List<FixRangeCompareToConstructionOne.DataRow> stagedRows = new ArrayList<>();
+    private final List<DataRow> stagedRows = new ArrayList<>();
     
     public final List<Double> totalUpdateTimes = new ArrayList<>();
     public final List<Double> clientSearchTimes = new ArrayList<>();
@@ -57,7 +57,7 @@ public final class EPSRQPlus_Adapter {
         
         if ("add".equalsIgnoreCase(op)) {
             int fileId = (files == null || files.length == 0) ? -1 : files[0];
-            stagedRows.add(new FixRangeCompareToConstructionOne.DataRow(fileId, pSet[0], pSet[1], keywords));
+            stagedRows.add(new DataRow(fileId, pSet[0], pSet[1], keywords));
             built = false;
             
             // 计算更新数据大小（简化估算）
@@ -220,7 +220,7 @@ public final class EPSRQPlus_Adapter {
         return chengduMinLat + (chengduMaxLat - chengduMinLat) * gridY / maxGrid;
     }
     
-    public EPSRQPlus_IndexBuilder.BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    public EPSRQPlus_IndexBuilder.BuildStats buildIndex(List<DataRow> allData) {
         EPSRQPlus_IndexBuilder.BuildStats stats = builder.buildIndex(allData);
         built = true;
         stagedRows.clear();
@@ -236,7 +236,7 @@ public final class EPSRQPlus_Adapter {
             built = true;
             return;
         }
-        builder.buildIndex(new ArrayList<FixRangeCompareToConstructionOne.DataRow>());
+        builder.buildIndex(new ArrayList<DataRow>());
         built = true;
     }
     

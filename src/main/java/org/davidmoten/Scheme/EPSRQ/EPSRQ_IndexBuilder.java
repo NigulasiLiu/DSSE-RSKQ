@@ -1,6 +1,6 @@
 package org.davidmoten.Scheme.EPSRQ;
 
-import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+import org.davidmoten.Scheme.EPSRQ.DataRow;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -90,7 +90,7 @@ public final class EPSRQ_IndexBuilder {
         return dictionaryKeywords;
     }
 
-    public BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    public BuildStats buildIndex(List<DataRow> allData) {
         dict.clear();
         dictionaryKeywords.clear();
         encKeywordBasis.clear();
@@ -102,7 +102,7 @@ public final class EPSRQ_IndexBuilder {
 
         Set<String> unique = new TreeSet<>();
         if (allData != null) {
-            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+            for (DataRow row : allData) {
                 if (row == null || row.keywords == null) {
                     continue;
                 }
@@ -142,7 +142,7 @@ public final class EPSRQ_IndexBuilder {
 
         int realCount = 0;
         if (allData != null) {
-            for (FixRangeCompareToConstructionOne.DataRow row : allData) {
+            for (DataRow row : allData) {
                 if (row == null || row.keywords == null) {
                     continue;
                 }

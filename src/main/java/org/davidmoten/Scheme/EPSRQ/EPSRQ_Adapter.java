@@ -1,6 +1,6 @@
 package org.davidmoten.Scheme.EPSRQ;
 
-import org.davidmoten.Experiment.Comparison.FixRangeCompareToConstructionOne;
+import org.davidmoten.Scheme.EPSRQ.DataRow;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,7 +30,7 @@ public final class EPSRQ_Adapter {
     private final EPSRQ_IndexBuilder builder;
     private volatile long searchBlackhole = 0L;
     private volatile boolean built = false;
-    private final List<FixRangeCompareToConstructionOne.DataRow> stagedRows = new ArrayList<FixRangeCompareToConstructionOne.DataRow>();
+    private final List<DataRow> stagedRows = new ArrayList<DataRow>();
 
     public final List<Double> totalUpdateTimes = new ArrayList<>();
     public final List<Double> clientSearchTimes = new ArrayList<>();
@@ -61,7 +61,7 @@ public final class EPSRQ_Adapter {
         lastUpdateBytes = 0;
         if ("add".equalsIgnoreCase(op)) {
             int fileId = (files == null || files.length == 0) ? -1 : files[0];
-            stagedRows.add(new FixRangeCompareToConstructionOne.DataRow(fileId, pSet[0], pSet[1], keywords));
+            stagedRows.add(new DataRow(fileId, pSet[0], pSet[1], keywords));
             built = false;
             int dimSpace = builder.getKeyPair().kv2Space.dim;
             long perCipherBytes = 2L * dimSpace * 8L;
@@ -170,7 +170,7 @@ public final class EPSRQ_Adapter {
         return out;
     }
 
-    public EPSRQ_IndexBuilder.BuildStats buildIndex(List<FixRangeCompareToConstructionOne.DataRow> allData) {
+    public EPSRQ_IndexBuilder.BuildStats buildIndex(List<DataRow> allData) {
         EPSRQ_IndexBuilder.BuildStats st = builder.buildIndex(allData);
         built = true;
         stagedRows.clear();
@@ -186,7 +186,7 @@ public final class EPSRQ_Adapter {
             built = true;
             return;
         }
-        builder.buildIndex(new ArrayList<FixRangeCompareToConstructionOne.DataRow>());
+        builder.buildIndex(new ArrayList<DataRow>());
         built = true;
     }
 
